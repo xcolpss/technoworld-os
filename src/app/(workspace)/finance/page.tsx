@@ -81,7 +81,7 @@ export default async function FinancePage({ searchParams }: FinancePageProps) {
   return (
     <div className="space-y-6 pb-12">
       <PageHeader
-        eyebrow="TechnoWorld OS • Financial &amp; Owner Accounting System"
+        eyebrow="TechnoWorld OS â€¢ Financial &amp; Owner Accounting System"
         title="Finance &amp; Owner Accounts"
         description="Double-entry general ledger, multi-owner capital contributions, household drawings, and multi-wallet liquidity management."
       />
@@ -205,7 +205,7 @@ export default async function FinancePage({ searchParams }: FinancePageProps) {
                       {accounts.map((acc, idx) => (
                         <tr key={idx} className="hover:bg-warm/30 transition">
                           <td className="p-3 font-bold text-ink">{acc.account_name}</td>
-                          <td className="p-3"><Badge variant="secondary">{acc.account_type}</Badge></td>
+                          <td className="p-3"><Badge >{acc.account_type}</Badge></td>
                           <td className="p-3 font-mono font-bold text-brand-dark">{formatPkr(acc.opening_balance_paisa || 0)}</td>
                           <td className="p-3 text-right"><Badge variant="success">Active</Badge></td>
                         </tr>
@@ -420,7 +420,7 @@ export default async function FinancePage({ searchParams }: FinancePageProps) {
                     <Label>Purpose / Details</Label>
                     <Input name="purpose" placeholder="e.g. Monthly electricity bill" className="mt-1 h-9" />
                   </div>
-                  <Button type="submit" variant="secondary" className="w-full mt-2 text-danger hover:bg-danger-soft">Record Withdrawal</Button>
+                  <Button type="submit"  className="w-full mt-2 text-danger hover:bg-danger-soft">Record Withdrawal</Button>
                 </form>
               </CardContent>
             </Card>

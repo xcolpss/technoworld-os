@@ -273,7 +273,7 @@ export function InventoryManager({
         </div>
 
         <div className="flex items-center gap-2">
-          <Button type="button" size="sm" variant="secondary" onClick={() => setShowCategoryModal(true)}>
+          <Button type="button" size="sm"  onClick={() => setShowCategoryModal(true)}>
             <FolderCog className="h-4 w-4 mr-1" /> Manage Categories ({categories.length})
           </Button>
           <Button type="button" size="sm" onClick={openAddModal}>
@@ -343,16 +343,16 @@ export function InventoryManager({
                       </td>
                       <td className="p-3 text-right">
                         <div className="flex items-center justify-end gap-1.5">
-                          <Button type="button" size="sm" variant="secondary" className="h-7 w-7 p-0 text-xs" onClick={() => handleAdjust(item.id, -1)} title="Decrease Stock">
+                          <Button type="button" size="sm"  className="h-7 w-7 p-0 text-xs" onClick={() => handleAdjust(item.id, -1)} title="Decrease Stock">
                             -
                           </Button>
-                          <Button type="button" size="sm" variant="secondary" className="h-7 w-7 p-0 text-xs" onClick={() => handleAdjust(item.id, 1)} title="Increase Stock">
+                          <Button type="button" size="sm"  className="h-7 w-7 p-0 text-xs" onClick={() => handleAdjust(item.id, 1)} title="Increase Stock">
                             +
                           </Button>
-                          <Button type="button" size="sm" variant="secondary" className="h-7 px-2.5 text-xs font-semibold" onClick={() => openEditModal(item)} title="Edit Product">
+                          <Button type="button" size="sm"  className="h-7 px-2.5 text-xs font-semibold" onClick={() => openEditModal(item)} title="Edit Product">
                             <Edit className="h-3.5 w-3.5 mr-1" /> Edit
                           </Button>
-                          <Button type="button" size="sm" variant="secondary" className="h-7 w-7 p-0 text-danger hover:bg-danger-soft border-danger/30" onClick={() => handleDeleteProduct(item.id)} title="Delete Product">
+                          <Button type="button" size="sm"  className="h-7 w-7 p-0 text-danger hover:bg-danger-soft border-danger/30" onClick={() => handleDeleteProduct(item.id)} title="Delete Product">
                             <Trash2 className="h-3.5 w-3.5" />
                           </Button>
                         </div>
@@ -372,7 +372,7 @@ export function InventoryManager({
           <div className="w-full max-w-md rounded-2xl border border-border bg-surface p-6 shadow-xl space-y-4">
             <div className="flex items-center justify-between border-b border-border pb-3">
               <h3 className="font-display text-base font-extrabold text-ink">Manage Product Categories</h3>
-              <Button type="button" size="sm" variant="ghost" onClick={() => setShowCategoryModal(false)}>✕</Button>
+              <Button type="button" size="sm" variant="ghost" onClick={() => setShowCategoryModal(false)}>âœ•</Button>
             </div>
 
             <form onSubmit={handleCategorySave} className="flex gap-2">
@@ -419,7 +419,7 @@ export function InventoryManager({
               <h3 className="font-display text-base font-extrabold text-ink">
                 {editingItem ? "Edit Physical Product" : "Add Physical Product"}
               </h3>
-              <Button type="button" size="sm" variant="ghost" onClick={() => setShowProductModal(false)}>✕</Button>
+              <Button type="button" size="sm" variant="ghost" onClick={() => setShowProductModal(false)}>âœ•</Button>
             </div>
 
             <form onSubmit={handleSaveProduct} className="space-y-3.5">
@@ -479,7 +479,7 @@ export function InventoryManager({
                 {editingItem ? (
                   <Button
                     type="button"
-                    variant="secondary"
+                    
                     className="text-danger hover:bg-danger-soft border-danger/30 text-xs"
                     onClick={() => handleDeleteProduct(editingItem.id)}
                   >

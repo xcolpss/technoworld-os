@@ -140,7 +140,7 @@ export function StaffManager({
   }
 
   function formatTime(isoString: string | null) {
-    if (!isoString) return "—";
+    if (!isoString) return "â€”";
     try {
       return new Date(isoString).toLocaleTimeString("en-US", {
         timeZone: "Asia/Karachi",
@@ -366,7 +366,7 @@ export function StaffManager({
                   </div>
 
                   <div className="flex items-center justify-end gap-2 pt-2 border-t border-border">
-                    <Button type="button" size="sm" variant="secondary" className="h-7 text-xs" onClick={() => openEditModal(emp)}>
+                    <Button type="button" size="sm"  className="h-7 text-xs" onClick={() => openEditModal(emp)}>
                       <Edit className="h-3 w-3 mr-1" /> Edit
                     </Button>
                     <Button type="button" size="sm" variant="ghost" className="h-7 text-xs text-danger hover:bg-danger-soft" onClick={() => handleDelete(emp.id)}>
@@ -417,7 +417,7 @@ export function StaffManager({
                           {isCheckedIn ? "Checked In" : att.actualOut ? "Shift Completed" : "Not Checked In"}
                         </Badge>
                       </div>
-                      <p className="text-muted">{att.designation} • Shift Window: <strong className="text-ink">{att.shiftWindow}</strong></p>
+                      <p className="text-muted">{att.designation} â€¢ Shift Window: <strong className="text-ink">{att.shiftWindow}</strong></p>
                     </div>
 
                     <div className="flex items-center gap-4">
@@ -475,13 +475,13 @@ export function StaffManager({
                           {l.status}
                         </Badge>
                       </div>
-                      <p className="text-muted">Type: {l.leaveType} • From {l.startDate} to {l.endDate}</p>
+                      <p className="text-muted">Type: {l.leaveType} â€¢ From {l.startDate} to {l.endDate}</p>
                       <p className="text-ink italic">"{l.reason}"</p>
                     </div>
 
                     {l.status === "PENDING" && (
                       <div className="flex items-center gap-2">
-                        <Button type="button" size="sm" variant="secondary" onClick={() => startTransition(async () => await onUpdateLeave(l.id, "APPROVED"))}>
+                        <Button type="button" size="sm"  onClick={() => startTransition(async () => await onUpdateLeave(l.id, "APPROVED"))}>
                           Approve
                         </Button>
                         <Button type="button" size="sm" variant="ghost" className="text-danger" onClick={() => startTransition(async () => await onUpdateLeave(l.id, "REJECTED"))}>
@@ -508,9 +508,9 @@ export function StaffManager({
                 <CardContent className="p-4 flex items-center justify-between gap-3 text-xs">
                   <div>
                     <p className="font-bold text-ink">{emp.full_name} ({emp.employee_number})</p>
-                    <p className="text-muted">Structure: {emp.salary_type} • Salary: <strong className="font-mono text-brand-dark">{formatPkr(emp.salary_amount_paisa)}</strong></p>
+                    <p className="text-muted">Structure: {emp.salary_type} â€¢ Salary: <strong className="font-mono text-brand-dark">{formatPkr(emp.salary_amount_paisa)}</strong></p>
                   </div>
-                  <Button type="button" size="sm" variant="secondary" onClick={() => setSelectedPayslipEmp(emp)}>
+                  <Button type="button" size="sm"  onClick={() => setSelectedPayslipEmp(emp)}>
                     Generate Payslip
                   </Button>
                 </CardContent>
@@ -553,8 +553,8 @@ export function StaffManager({
                 <div>
                   <Label className="text-xs">Assigned Shift</Label>
                   <select value={shiftType} onChange={(e) => setShiftType(e.target.value)} className="mt-1 h-9 w-full rounded-xl border border-border bg-warm px-2.5 text-xs font-semibold">
-                    <option value="MORNING">Morning (08:00–16:00)</option>
-                    <option value="EVENING">Evening (16:00–00:00)</option>
+                    <option value="MORNING">Morning (08:00â€“16:00)</option>
+                    <option value="EVENING">Evening (16:00â€“00:00)</option>
                   </select>
                 </div>
               </div>

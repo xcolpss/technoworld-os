@@ -201,12 +201,12 @@ export default function DailyClosingPage() {
     <div className="space-y-6 pb-12 max-w-7xl mx-auto">
       <div className="flex items-center justify-between">
         <PageHeader
-          eyebrow="TechnoWorld OS • Financial Closing &amp; Accountant Suite"
+          eyebrow="TechnoWorld OS â€¢ Financial Closing &amp; Accountant Suite"
           title="Daily Closing &amp; Accountant Report"
           description="Record daily wages, reconcile expenses, audit cash drawer counts, and generate clean accountant exports."
         />
         <Link href="/dashboard">
-          <Button type="button" variant="secondary" size="sm" className="gap-2">
+          <Button type="button"  size="sm" className="gap-2">
             <ArrowLeft className="h-4 w-4" /> Back to Dashboard
           </Button>
         </Link>
@@ -251,7 +251,7 @@ export default function DailyClosingPage() {
             <Button 
               type="button"
               onClick={handleExportCSV} 
-              variant="secondary" 
+               
               className="flex-1 sm:flex-none gap-2 text-xs font-bold bg-[var(--surface-secondary)] hover:bg-[var(--border)] text-[var(--foreground)] cursor-pointer"
             >
               <Download className="h-4 w-4 text-[var(--primary)]" /> Download Clean CSV
@@ -284,7 +284,7 @@ export default function DailyClosingPage() {
                 <div key={exp.id} className="flex items-center justify-between p-2.5 rounded-xl bg-[var(--surface-secondary)] text-xs">
                   <div>
                     <p className="font-bold text-[var(--foreground)]">{exp.description}</p>
-                    <p className="text-[10px] text-[var(--foreground-secondary)]">{exp.category} • Paid by {exp.paidBy}</p>
+                    <p className="text-[10px] text-[var(--foreground-secondary)]">{exp.category} â€¢ Paid by {exp.paidBy}</p>
                   </div>
                   <div className="flex items-center gap-3">
                     <span className="font-mono font-bold text-[var(--danger)]">Rs. {exp.amount.toLocaleString()}</span>

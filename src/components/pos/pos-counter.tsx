@@ -519,7 +519,7 @@ export function PosCounter({
             <CardContent className="p-6 space-y-4">
               <div className="flex items-center justify-between border-b border-border pb-3">
                 <h3 className="font-display text-sm font-extrabold text-ink">Movies, TV Shows &amp; Media Copies</h3>
-                <Button type="button" size="sm" variant="secondary" onClick={() => setShowMediaModal(true)}>
+                <Button type="button" size="sm"  onClick={() => setShowMediaModal(true)}>
                   <FolderCog className="h-4 w-4 mr-1" /> Manage Categories ({mediaCategories.length})
                 </Button>
               </div>
@@ -533,7 +533,7 @@ export function PosCounter({
                 >
                   {mediaCategories.map((m) => (
                     <option key={m.id} value={m.id}>
-                      {m.name} ({m.type}) — {formatPkr(m.defaultPricePaisa)}
+                      {m.name} ({m.type}) â€” {formatPkr(m.defaultPricePaisa)}
                     </option>
                   ))}
                 </select>
@@ -572,7 +572,7 @@ export function PosCounter({
               </div>
 
               <Button type="button" className="w-full" onClick={addMediaJob}>
-                Add Media to Bill • {formatPkr(liveTotalMediaPaisa)}
+                Add Media to Bill â€¢ {formatPkr(liveTotalMediaPaisa)}
               </Button>
             </CardContent>
           </Card>
@@ -584,7 +584,7 @@ export function PosCounter({
             <CardContent className="p-6 space-y-4">
               <div className="flex items-center justify-between border-b border-border pb-3">
                 <h3 className="font-display text-sm font-extrabold text-ink">Prints &amp; Papers Calculator</h3>
-                <Button type="button" size="sm" variant="secondary" onClick={() => setShowPaperModal(true)}>
+                <Button type="button" size="sm"  onClick={() => setShowPaperModal(true)}>
                   <FolderCog className="h-4 w-4 mr-1" /> Manage Paper Types ({printPapers.length})
                 </Button>
               </div>
@@ -678,7 +678,7 @@ export function PosCounter({
               )}
 
               <div>
-                <Label className="text-xs">Custom Price Override per Print (Rs.) — Optional</Label>
+                <Label className="text-xs">Custom Price Override per Print (Rs.) â€” Optional</Label>
                 <Input
                   type="number"
                   min="0"
@@ -692,7 +692,7 @@ export function PosCounter({
               <div className="rounded-2xl border border-brand/40 bg-brand-soft/10 p-4 space-y-2">
                 <div className="flex items-center justify-between text-xs font-bold text-brand-dark">
                   <span>Live Calculator Breakdown:</span>
-                  <span className="font-mono">{currentPaper?.name || "Paper"} • {printMode} • {printSideMode}</span>
+                  <span className="font-mono">{currentPaper?.name || "Paper"} â€¢ {printMode} â€¢ {printSideMode}</span>
                 </div>
                 <div className="grid grid-cols-3 gap-2 text-center text-xs font-mono pt-1 border-t border-brand/20">
                   <div>
@@ -711,7 +711,7 @@ export function PosCounter({
               </div>
 
               <Button type="button" className="w-full" onClick={addPrintJob}>
-                Add Print Job to Bill • {formatPkr(liveTotalPrintPaisa)}
+                Add Print Job to Bill â€¢ {formatPkr(liveTotalPrintPaisa)}
               </Button>
             </CardContent>
           </Card>
@@ -787,7 +787,7 @@ export function PosCounter({
             <CardContent className="p-6 space-y-4">
               <div className="flex items-center justify-between border-b border-border pb-3">
                 <h3 className="font-display text-sm font-extrabold text-ink">Document Composing &amp; Online Services</h3>
-                <Button type="button" size="sm" variant="secondary" onClick={() => setShowComposingModal(true)}>
+                <Button type="button" size="sm"  onClick={() => setShowComposingModal(true)}>
                   <FolderCog className="h-4 w-4 mr-1" /> Manage Services ({composingServices.length})
                 </Button>
               </div>
@@ -801,7 +801,7 @@ export function PosCounter({
                 >
                   {composingServices.map((s) => (
                     <option key={s.id} value={s.id}>
-                      {s.name} — {formatPkr(s.defaultPricePaisa)}
+                      {s.name} â€” {formatPkr(s.defaultPricePaisa)}
                     </option>
                   ))}
                 </select>
@@ -819,7 +819,7 @@ export function PosCounter({
               </div>
 
               <div>
-                <Label className="text-xs font-bold text-ink">Custom Price Override (Rs.) — Optional</Label>
+                <Label className="text-xs font-bold text-ink">Custom Price Override (Rs.) â€” Optional</Label>
                 <Input
                   type="number"
                   min="0"
@@ -852,7 +852,7 @@ export function PosCounter({
               </div>
 
               <Button type="button" className="w-full" onClick={addComposingJob}>
-                Add Composing Job to Bill • {formatPkr(liveTotalComposingPaisa)}
+                Add Composing Job to Bill â€¢ {formatPkr(liveTotalComposingPaisa)}
               </Button>
             </CardContent>
           </Card>
@@ -896,11 +896,11 @@ export function PosCounter({
                     </div>
 
                     <div className="flex items-center gap-1.5">
-                      <Button type="button" size="sm" variant="secondary" className="h-6 w-6 p-0 text-xs" onClick={() => updateQuantity(item.id, -1)}>
+                      <Button type="button" size="sm"  className="h-6 w-6 p-0 text-xs" onClick={() => updateQuantity(item.id, -1)}>
                         <Minus className="h-3 w-3" />
                       </Button>
                       <span className="font-mono font-bold text-ink w-5 text-center">{item.quantity}</span>
-                      <Button type="button" size="sm" variant="secondary" className="h-6 w-6 p-0 text-xs" onClick={() => updateQuantity(item.id, 1)}>
+                      <Button type="button" size="sm"  className="h-6 w-6 p-0 text-xs" onClick={() => updateQuantity(item.id, 1)}>
                         <Plus className="h-3 w-3" />
                       </Button>
                     </div>
@@ -956,7 +956,7 @@ export function PosCounter({
               onClick={handleCheckout}
               disabled={isPending || cart.length === 0}
             >
-              {isPending ? "Processing Sale..." : `Complete Sale • ${formatPkr(grandTotalPaisa)}`}
+              {isPending ? "Processing Sale..." : `Complete Sale â€¢ ${formatPkr(grandTotalPaisa)}`}
             </Button>
           </CardContent>
         </Card>
@@ -973,8 +973,8 @@ export function PosCounter({
                 TW
               </div>
               <h2 className="font-display text-sm font-extrabold tracking-wider uppercase text-ink print:text-black">TECHNO WORLD</h2>
-              <p className="text-[10px] uppercase font-semibold text-muted print:text-gray-700">COMPUTERS • PRINTING • ACCESSORIES</p>
-              <p className="text-[9px] text-muted print:text-gray-600">Rawalpindi • Sales &amp; Digital Services</p>
+              <p className="text-[10px] uppercase font-semibold text-muted print:text-gray-700">COMPUTERS â€¢ PRINTING â€¢ ACCESSORIES</p>
+              <p className="text-[9px] text-muted print:text-gray-600">Rawalpindi â€¢ Sales &amp; Digital Services</p>
             </div>
 
             {/* Meta Info */}
@@ -1007,7 +1007,7 @@ export function PosCounter({
                   <div key={idx} className="space-y-0.5 border-b border-dotted border-border/60 pb-1.5 last:border-none">
                     <p className="font-bold text-ink print:text-black">{item.name}</p>
                     <div className="flex justify-between text-[10px] text-muted print:text-gray-600">
-                      <span>Qty: {item.quantity} • {formatPkr(item.retailPricePaisa)}</span>
+                      <span>Qty: {item.quantity} â€¢ {formatPkr(item.retailPricePaisa)}</span>
                       <span className="font-bold font-mono text-ink print:text-black">{formatPkr(lineTotal)}</span>
                     </div>
                   </div>
@@ -1054,7 +1054,7 @@ export function PosCounter({
               </Button>
               <Button
                 type="button"
-                variant="secondary"
+                
                 onClick={() => setCompletedSale(null)}
               >
                 Close / New Sale
@@ -1071,7 +1071,7 @@ export function PosCounter({
           <div className="w-full max-w-md rounded-2xl border border-border bg-surface p-6 shadow-xl space-y-4">
             <div className="flex items-center justify-between border-b border-border pb-3">
               <h3 className="font-display text-base font-extrabold text-ink">Manage Paper Types &amp; Rates</h3>
-              <Button type="button" size="sm" variant="ghost" onClick={() => setShowPaperModal(false)}>✕</Button>
+              <Button type="button" size="sm" variant="ghost" onClick={() => setShowPaperModal(false)}>âœ•</Button>
             </div>
 
             <form onSubmit={handlePaperSave} className="space-y-3">
@@ -1153,7 +1153,7 @@ export function PosCounter({
           <div className="w-full max-w-md rounded-2xl border border-border bg-surface p-6 shadow-xl space-y-4">
             <div className="flex items-center justify-between border-b border-border pb-3">
               <h3 className="font-display text-base font-extrabold text-ink">Manage Media Categories &amp; Prices</h3>
-              <Button type="button" size="sm" variant="ghost" onClick={() => setShowMediaModal(false)}>✕</Button>
+              <Button type="button" size="sm" variant="ghost" onClick={() => setShowMediaModal(false)}>âœ•</Button>
             </div>
 
             <form onSubmit={handleMediaCatSave} className="space-y-3">
@@ -1238,7 +1238,7 @@ export function PosCounter({
           <div className="w-full max-w-md rounded-2xl border border-border bg-surface p-6 shadow-xl space-y-4">
             <div className="flex items-center justify-between border-b border-border pb-3">
               <h3 className="font-display text-base font-extrabold text-ink">Manage Composing Services &amp; Prices</h3>
-              <Button type="button" size="sm" variant="ghost" onClick={() => setShowComposingModal(false)}>✕</Button>
+              <Button type="button" size="sm" variant="ghost" onClick={() => setShowComposingModal(false)}>âœ•</Button>
             </div>
 
             <form onSubmit={handleComposingSave} className="space-y-3">

@@ -104,7 +104,7 @@ const DEFAULT_PAPER_TYPES: PaperTypeOption[] = [
 
 const DEFAULT_MEDIA_TYPES: MediaCategoryOption[] = [
   { id: "movie", name: "Movie", hint: "Rs. 20 each", defaultRatePkr: 20 },
-  { id: "season", name: "Season / Drama", hint: "Rs. 100 – 200+ (Variable)", defaultRatePkr: 150 },
+  { id: "season", name: "Season / Drama", hint: "Rs. 100 â€“ 200+ (Variable)", defaultRatePkr: 150 },
   { id: "games", name: "Games", hint: "PC / Console Games", defaultRatePkr: 100 },
   { id: "cartoon", name: "Cartoons / Anime", hint: "Custom price each", defaultRatePkr: 100 },
   { id: "songs", name: "Songs / Audio", hint: "Custom pack rate", defaultRatePkr: 50 },
@@ -477,8 +477,8 @@ export function PosTerminal({
     const paperName = selectedPaper?.name ?? "Normal A4 Paper";
 
     const label = isPassportSelected
-      ? `Passport Size Photos (${passportPhotosCount} Photos) • ${paperName}`
-      : `${printColor === "BW" ? "B&W" : "Color"} Print • ${paperName} • ${
+      ? `Passport Size Photos (${passportPhotosCount} Photos) â€¢ ${paperName}`
+      : `${printColor === "BW" ? "B&W" : "Color"} Print â€¢ ${paperName} â€¢ ${
           printSides === "SINGLE" ? "1-Sided" : "2-Sided"
         } (${qty === 1 ? "1 Page" : `${qty} Pages`})`;
 
@@ -719,7 +719,7 @@ export function PosTerminal({
               {isPending ? "Opening..." : "Start Shift & Open PC-01"}
             </Button>
             <Link href="/shifts">
-              <Button type="button" size="sm" variant="secondary">
+              <Button type="button" size="sm" >
                 Custom Float
               </Button>
             </Link>
@@ -742,7 +742,7 @@ export function PosTerminal({
               >
                 {openSessions.map((s) => (
                   <option key={s.id} value={s.id}>
-                    {s.terminal_code} — {s.terminal_name} (Cash in Drawer:{" "}
+                    {s.terminal_code} â€” {s.terminal_name} (Cash in Drawer:{" "}
                     {formatPkr(s.expected_closing_paisa)})
                   </option>
                 ))}
@@ -763,14 +763,14 @@ export function PosTerminal({
                 <CheckCircle2 className="h-7 w-7 text-success shrink-0" />
                 <div>
                   <p className="font-display text-base font-extrabold text-ink">
-                    Sale Completed • Bill #{receipt.saleNumber} ({receipt.customerName})
+                    Sale Completed â€¢ Bill #{receipt.saleNumber} ({receipt.customerName})
                   </p>
                   <p className="text-xs text-muted">
                     Paid{" "}
                     <strong className="font-mono text-ink">
                       {formatPkr(receipt.totalPaisa)}
                     </strong>{" "}
-                    ({receipt.paymentMethod}) • Change Due:{" "}
+                    ({receipt.paymentMethod}) â€¢ Change Due:{" "}
                     <strong className="font-mono text-success">
                       {formatPkr(receipt.changePaisa)}
                     </strong>
@@ -845,10 +845,10 @@ export function PosTerminal({
                   </svg>
                 </div>
                 <p className="text-[11px] font-extrabold uppercase tracking-wider text-black">
-                  Computers • Printing • Accessories
+                  Computers â€¢ Printing â€¢ Accessories
                 </p>
                 <p className="text-[10px] font-semibold text-black mt-0.5">
-                  Rawalpindi • Sales &amp; Digital Services
+                  Rawalpindi â€¢ Sales &amp; Digital Services
                 </p>
               </div>
 
@@ -890,7 +890,7 @@ export function PosTerminal({
                       </span>
                     </div>
                     <div className="text-[11px] font-mono font-semibold mt-0.5">
-                      Qty: {l.qty} × {formatPkr(l.unitPricePaisa)}
+                      Qty: {l.qty} Ã— {formatPkr(l.unitPricePaisa)}
                     </div>
                   </div>
                 ))}
@@ -1112,7 +1112,7 @@ export function PosTerminal({
                       Print &amp; Photocopy Billing
                     </h2>
                     <p className="text-xs text-muted mt-0.5">
-                      Pick paper type, color, sides &amp; quantity — edit price anytime.
+                      Pick paper type, color, sides &amp; quantity â€” edit price anytime.
                     </p>
                   </div>
 
@@ -1374,7 +1374,7 @@ export function PosTerminal({
                                 : "text-muted"
                             }`}
                           >
-                            Single Rs. 20 • Multiple Rs. 15
+                            Single Rs. 20 â€¢ Multiple Rs. 15
                           </p>
                         </button>
 
@@ -1395,7 +1395,7 @@ export function PosTerminal({
                                 : "text-muted"
                             }`}
                           >
-                            1-Side Rs. 50 • 2-Side Rs. 100
+                            1-Side Rs. 50 â€¢ 2-Side Rs. 100
                           </p>
                         </button>
                       </div>
@@ -1525,7 +1525,7 @@ export function PosTerminal({
                     className="h-12 w-full text-base transition-transform active:scale-[0.99]"
                   >
                     <Plus className="h-5 w-5" />
-                    Add Print to Bill • Rs.{" "}
+                    Add Print to Bill â€¢ Rs.{" "}
                     {printLineTotalPkr.toLocaleString("en-PK")}
                   </Button>
                 </div>
@@ -1544,7 +1544,7 @@ export function PosTerminal({
                       Movies, Seasons, Games &amp; Songs
                     </h2>
                     <p className="text-xs text-muted mt-0.5">
-                      Pick category, set quantity &amp; price each — add multiple seasons or games at different prices.
+                      Pick category, set quantity &amp; price each â€” add multiple seasons or games at different prices.
                     </p>
                   </div>
 
@@ -1798,7 +1798,7 @@ export function PosTerminal({
                     className="h-12 w-full text-base transition-transform active:scale-[0.99]"
                   >
                     <Plus className="h-5 w-5" />
-                    Add {selectedMedia?.name ?? "Media"} to Bill • Rs.{" "}
+                    Add {selectedMedia?.name ?? "Media"} to Bill â€¢ Rs.{" "}
                     {mediaLineTotalPkr.toLocaleString("en-PK")}
                   </Button>
                 </div>
@@ -2071,7 +2071,7 @@ export function PosTerminal({
                     className="h-12 w-full text-base transition-transform active:scale-[0.99]"
                   >
                     <Plus className="h-5 w-5" />
-                    Add {selectedComposing?.name ?? "Composing"} to Bill • Rs.{" "}
+                    Add {selectedComposing?.name ?? "Composing"} to Bill â€¢ Rs.{" "}
                     {composingLineTotalPkr.toLocaleString("en-PK")}
                   </Button>
                 </div>
@@ -2281,7 +2281,7 @@ export function PosTerminal({
                   <CreditCard className="h-4 w-4" />
                   {isPending
                     ? "Completing..."
-                    : `Complete Sale • ${formatPkr(totalPaisa)}`}
+                    : `Complete Sale â€¢ ${formatPkr(totalPaisa)}`}
                 </Button>
               </div>
             </CardContent>

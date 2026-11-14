@@ -134,7 +134,7 @@ export function DashboardOverview({
             <h3 className="font-display text-sm font-extrabold text-ink">
               Reporting Period: <span className="text-brand">{metrics.periodLabel}</span>
             </h3>
-            <p className="text-xs text-muted">Asia/Karachi Timezone • Monday Week Start</p>
+            <p className="text-xs text-muted">Asia/Karachi Timezone â€¢ Monday Week Start</p>
           </div>
         </div>
 
@@ -206,19 +206,19 @@ export function DashboardOverview({
           </Button>
         </Link>
         <Link href="/expenses">
-          <Button variant="secondary" className="h-11 w-full text-xs sm:text-sm font-extrabold">
+          <Button  className="h-11 w-full text-xs sm:text-sm font-extrabold">
             <ReceiptText className="h-4 w-4" />
             Expenses &amp; Vault
           </Button>
         </Link>
         <Link href="/customers">
-          <Button variant="secondary" className="h-11 w-full text-xs sm:text-sm font-extrabold">
+          <Button  className="h-11 w-full text-xs sm:text-sm font-extrabold">
             <UserCheck className="h-4 w-4" />
             Udhaar Ledger
           </Button>
         </Link>
         <Link href="/shifts">
-          <Button variant="secondary" className="h-11 w-full text-xs sm:text-sm font-extrabold">
+          <Button  className="h-11 w-full text-xs sm:text-sm font-extrabold">
             <Monitor className="h-4 w-4" />
             Counter Shifts
           </Button>
@@ -357,7 +357,7 @@ export function DashboardOverview({
           <div className="grid grid-cols-2 gap-3">
             <Card className="border-brand/40 bg-brand-soft/10">
               <CardContent className="p-4 space-y-1">
-                <span className="text-xs font-bold text-muted">Morning Shift (08:00–16:00)</span>
+                <span className="text-xs font-bold text-muted">Morning Shift (08:00â€“16:00)</span>
                 <p className="font-mono text-xl font-extrabold text-brand-dark">
                   {formatPkr(metrics.morningRevenuePaisa)}
                 </p>
@@ -367,7 +367,7 @@ export function DashboardOverview({
 
             <Card className="border-brand/40 bg-brand-soft/10">
               <CardContent className="p-4 space-y-1">
-                <span className="text-xs font-bold text-muted">Evening Shift (16:00–00:00)</span>
+                <span className="text-xs font-bold text-muted">Evening Shift (16:00â€“00:00)</span>
                 <p className="font-mono text-xl font-extrabold text-brand-dark">
                   {formatPkr(metrics.eveningRevenuePaisa)}
                 </p>
@@ -419,7 +419,7 @@ export function DashboardOverview({
                       <div>
                         <p className="font-bold text-ink">{cat.category}</p>
                         <p className="text-[11px] text-muted">
-                          {cat.txCount} txns • {cat.quantitySold} units sold
+                          {cat.txCount} txns â€¢ {cat.quantitySold} units sold
                         </p>
                       </div>
                       <div className="text-right font-mono">
@@ -462,7 +462,7 @@ export function DashboardOverview({
                       <div className="space-y-0.5 min-w-0">
                         <p className="font-bold text-ink truncate">{p.name}</p>
                         <p className="text-[11px] text-muted">
-                          {p.category} • Sold: <strong className="text-brand">{p.unitsSold}</strong> • Margin: <strong className="text-success">{p.marginPercent.toFixed(1)}%</strong>
+                          {p.category} â€¢ Sold: <strong className="text-brand">{p.unitsSold}</strong> â€¢ Margin: <strong className="text-success">{p.marginPercent.toFixed(1)}%</strong>
                         </p>
                       </div>
                     </div>
@@ -517,7 +517,7 @@ export function DashboardOverview({
                   <div key={act.id} className="flex items-center justify-between border-b border-border pb-2 text-xs">
                     <div>
                       <p className="font-bold text-ink">{act.title}</p>
-                      <p className="text-[10px] text-muted">{act.subtitle} • {act.timePk}</p>
+                      <p className="text-[10px] text-muted">{act.subtitle} â€¢ {act.timePk}</p>
                     </div>
                     <span className="font-mono font-extrabold text-brand-dark">{formatPkr(act.amountPaisa)}</span>
                   </div>

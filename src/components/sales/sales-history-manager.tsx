@@ -369,7 +369,7 @@ export function SalesHistoryManager({
           <CardContent className="p-4 space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <p className="text-sm font-bold text-ink">
-                Thermal Receipt Ready • Bill #{reprintSale.sale_number}
+                Thermal Receipt Ready â€¢ Bill #{reprintSale.sale_number}
               </p>
               <div className="flex items-center gap-2">
                 <Button type="button" size="sm" onClick={() => window.print()}>
@@ -438,10 +438,10 @@ export function SalesHistoryManager({
                   </svg>
                 </div>
                 <p className="text-[11px] font-extrabold uppercase tracking-wider text-black">
-                  Computers • Printing • Accessories
+                  Computers â€¢ Printing â€¢ Accessories
                 </p>
                 <p className="text-[10px] font-semibold text-black mt-0.5">
-                  Rawalpindi • Sales &amp; Digital Services
+                  Rawalpindi â€¢ Sales &amp; Digital Services
                 </p>
               </div>
 
@@ -455,7 +455,7 @@ export function SalesHistoryManager({
                 <div className="flex justify-between">
                   <span className="font-bold">DATE:</span>
                   <span className="font-mono font-semibold">
-                    {reprintSale.date_pk} • {reprintSale.time_pk}
+                    {reprintSale.date_pk} â€¢ {reprintSale.time_pk}
                   </span>
                 </div>
                 <div className="flex justify-between">
@@ -483,7 +483,7 @@ export function SalesHistoryManager({
                       </span>
                     </div>
                     <div className="text-[11px] font-mono font-semibold mt-0.5">
-                      Qty: {l.quantity} × {formatPkr(l.unit_price_paisa)}
+                      Qty: {l.quantity} Ã— {formatPkr(l.unit_price_paisa)}
                     </div>
                   </div>
                 ))}
@@ -556,7 +556,7 @@ export function SalesHistoryManager({
             </div>
             <div>
               <p className="text-sm font-extrabold text-danger">
-                Owner Audit Alert: {voidedCount} Voided • {editedCount} Edited Bill
+                Owner Audit Alert: {voidedCount} Voided â€¢ {editedCount} Edited Bill
                 {flaggedCount === 1 ? "" : "s"}
               </p>
               <p className="text-xs text-ink/80">
@@ -640,7 +640,7 @@ export function SalesHistoryManager({
               {formatPkr(digitalTotalPaisa)}
             </p>
             <p className="mt-0.5 text-[10px] text-muted truncate">
-              JC: {formatPkr(jazzCashPaisa)} • EP: {formatPkr(easyPaisaPaisa)} • Bank:{" "}
+              JC: {formatPkr(jazzCashPaisa)} â€¢ EP: {formatPkr(easyPaisaPaisa)} â€¢ Bank:{" "}
               {formatPkr(bankPaisa)}
             </p>
           </CardContent>
@@ -819,9 +819,9 @@ export function SalesHistoryManager({
                       </div>
 
                       <p className="text-xs text-muted">
-                        {sale.date_pk} at {sale.time_pk} • {sale.lines.length}{" "}
+                        {sale.date_pk} at {sale.time_pk} â€¢ {sale.lines.length}{" "}
                         {sale.lines.length === 1 ? "item" : "items"}
-                        {sale.edit_summary ? ` • ${sale.edit_summary}` : ""}
+                        {sale.edit_summary ? ` â€¢ ${sale.edit_summary}` : ""}
                       </p>
                     </div>
 
@@ -849,7 +849,7 @@ export function SalesHistoryManager({
                       <Button
                         type="button"
                         size="sm"
-                        variant="secondary"
+                        
                         onClick={() => triggerThermalReprint(sale)}
                       >
                         <Printer className="h-3.5 w-3.5" />
@@ -1094,7 +1094,7 @@ export function SalesHistoryManager({
                             <Button
                               type="button"
                               size="sm"
-                              variant="secondary"
+                              
                               onClick={handleAddCatalogLineToEdit}
                             >
                               Add
@@ -1137,7 +1137,7 @@ export function SalesHistoryManager({
                             <Button
                               type="button"
                               size="sm"
-                              variant="secondary"
+                              
                               onClick={handleAddCustomLineToEdit}
                             >
                               Add
@@ -1197,7 +1197,7 @@ export function SalesHistoryManager({
                                   : "text-ink"
                               }`}
                             >
-                              {line.quantity}× {line.description}
+                              {line.quantity}Ã— {line.description}
                             </span>
                             <span className="ml-2 font-mono text-[11px] text-muted">
                               (@ {formatPkr(line.unit_price_paisa)})
