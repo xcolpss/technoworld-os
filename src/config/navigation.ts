@@ -1,0 +1,88 @@
+﻿import { NavItem } from "@/types/system";
+
+export const APP_NAVIGATION: NavItem[] = [
+  {
+    label: "Dashboard",
+    href: "/dashboard",
+    iconName: "LayoutDashboard",
+    allowedRoles: ["OWNER", "MANAGER", "EMPLOYEE"],
+    section: "OPERATIONS",
+  },
+  {
+    label: "POS Counter",
+    href: "/pos",
+    iconName: "ShoppingCart",
+    allowedRoles: ["OWNER", "MANAGER", "EMPLOYEE"],
+    section: "OPERATIONS",
+  },
+  {
+    label: "Sales History",
+    href: "/sales",
+    iconName: "Receipt",
+    allowedRoles: ["OWNER", "MANAGER", "EMPLOYEE"],
+    section: "OPERATIONS",
+  },
+  {
+    label: "Shifts & Cash",
+    href: "/shifts",
+    iconName: "Clock",
+    allowedRoles: ["OWNER", "MANAGER", "EMPLOYEE"],
+    section: "OPERATIONS",
+  },
+  {
+    label: "Expenses",
+    href: "/expenses",
+    iconName: "Wallet",
+    allowedRoles: ["OWNER", "MANAGER", "EMPLOYEE"],
+    section: "OPERATIONS",
+  },
+  {
+    label: "Customers",
+    href: "/customers",
+    iconName: "Users",
+    allowedRoles: ["OWNER", "MANAGER", "EMPLOYEE"],
+    section: "OPERATIONS",
+  },
+  {
+    label: "Inventory",
+    href: "/inventory",
+    iconName: "Package",
+    allowedRoles: ["OWNER", "MANAGER"],
+    section: "FINANCE_ADMIN",
+  },
+  {
+    label: "Finance & Accounts",
+    href: "/finance",
+    iconName: "Landmark",
+    allowedRoles: ["OWNER"],
+    section: "FINANCE_ADMIN",
+  },
+  {
+    label: "Employees",
+    href: "/employees",
+    iconName: "UserCog",
+    allowedRoles: ["OWNER", "MANAGER"],
+    section: "FINANCE_ADMIN",
+  },
+  {
+    label: "Reports",
+    href: "/reports",
+    iconName: "BarChart3",
+    allowedRoles: ["OWNER", "MANAGER"],
+    section: "FINANCE_ADMIN",
+  },
+  {
+    label: "Audit Trail",
+    href: "/audit",
+    iconName: "ShieldCheck",
+    allowedRoles: ["OWNER"],
+    section: "FINANCE_ADMIN",
+  },
+  {
+    label: "Settings",
+    href: "/settings",
+    iconName: "Settings",
+    allowedRoles: ["OWNER"],
+    section: "FINANCE_ADMIN",
+  },
+];
