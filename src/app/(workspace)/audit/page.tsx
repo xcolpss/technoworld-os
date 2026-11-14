@@ -24,7 +24,7 @@ export default async function AuditPage() {
   return (
     <div className="space-y-6 pb-12 max-w-7xl mx-auto px-4 sm:px-6">
       <PageHeader
-        eyebrow="TechnoWorld OS • Security &amp; Compliance"
+        eyebrow="TechnoWorld OS Ã¢â‚¬Â¢ Security &amp; Compliance"
         title="Audit Trail &amp; Immutable Logs"
         description="Secure chronological ledger tracking sensitive actions, owner capital inputs, household withdrawals, and financial transfers."
       />
@@ -55,7 +55,7 @@ export default async function AuditPage() {
               <History className="h-5 w-5 text-brand" />
               <h3 className="font-display text-base font-extrabold text-ink">System &amp; Financial Action Log</h3>
             </div>
-            <Badge variant="secondary" className="font-mono text-xs px-3 py-1">{logs.length} Log Entries</Badge>
+            <Badge  className="font-mono text-xs px-3 py-1">{logs.length} Log Entries</Badge>
           </div>
 
           <div className="overflow-x-auto">
