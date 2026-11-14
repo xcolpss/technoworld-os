@@ -33,20 +33,22 @@ export default async function StaffPage() {
 
   const employees: EmployeeRecord[] = (rawEmployees ?? []).map((e: Record<string, unknown>) => {
     const id = String(e.id);
-    return {
-      id,
-      employee_number: String(e.employee_number ?? "EMP-000"),
-      full_name: String(e.full_name ?? ""),
-      phone: e.phone ? String(e.phone) : null,
-      designation: String(e.designation ?? "Staff"),
-      department: e.department ? String(e.department) : null,
-      employment_status: (e.employment_status ?? "ACTIVE") as any,
-      assigned_shift_type: String(e.assigned_shift_type ?? "MORNING"),
-      salary_type: String(e.salary_type ?? "MONTHLY"),
-      salary_amount_paisa: Number(e.salary_amount_paisa ?? 0),
-      joining_date: String(e.joining_date ?? todayStr),
-      isCheckedInToday: checkedInIds.has(id),
-    };
+          return {
+        id,
+        employee_number: String(e.employee_number || ''),
+        full_name: String(e.full_name || ''),
+        phone: e.phone ? String(e.phone) : null,
+        designation: String(e.designation || 'Staff'),
+        department: e.department ? String(e.department) : null,
+        employment_status: e.employment_status,
+        assigned_shift_type: String(e.assigned_shift_type || 'Morning'),
+        salary_type: String(e.salary_type || 'Daily'),
+        salary_amount_paisa: Number(e.salary_amount_paisa || 0),
+        joining_date: String(e.joining_date || new Date().toISOString().split('T')[0]),
+        isCheckedInToday: Boolean(e.isCheckedInToday),
+        actualInToday: (e.actualInToday as string) || null,
+        actualOutToday: (e.actualOutToday as string) || null,
+      };;
   });
 
   const leaves: LeaveRecord[] = (rawLeaves ?? []).map((l: Record<string, unknown>) => {
