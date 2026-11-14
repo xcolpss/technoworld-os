@@ -14,21 +14,21 @@ interface AppShellProps {
 
 export function AppShell({
   children,
-  userName = "Shop Setup (Unauthenticated)",
+  userName = "Shop Setup (Phase 1)",
   role = "OWNER",
   supabaseReady = false,
 }: AppShellProps) {
   const [mobileOpen, setMobileOpen] = React.useState(false);
 
   return (
-    <div className="min-h-screen bg-warm text-ink">
+    <div className="min-h-screen text-ink">
       <Sidebar
         role={role}
         mobileOpen={mobileOpen}
         onCloseMobile={() => setMobileOpen(false)}
       />
 
-      <div className="lg:pl-64 flex min-h-screen flex-col">
+      <div className="lg:pl-66 flex min-h-screen flex-col">
         <Topbar
           onOpenMobileMenu={() => setMobileOpen(true)}
           userName={userName}
@@ -36,7 +36,7 @@ export function AppShell({
           supabaseReady={supabaseReady}
         />
 
-        <main className="flex-1 px-4 py-6 sm:px-6 lg:px-8">
+        <main className="flex-1 px-4 py-7 sm:px-6 lg:px-8">
           <div className="mx-auto max-w-7xl">{children}</div>
         </main>
       </div>

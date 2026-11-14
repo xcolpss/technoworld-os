@@ -3,12 +3,12 @@
 @theme inline {
   --color-brand: #FF6A00;
   --color-brand-dark: #E65300;
-  --color-brand-soft: #FFF0E5;
+  --color-brand-soft: #FFF1E6;
   --color-surface: #FFFFFF;
   --color-warm: #FFF8F3;
-  --color-ink: #20242B;
+  --color-ink: #181B20;
   --color-muted: #667085;
-  --color-border: #EAECF0;
+  --color-border: #E8E2DC;
   --color-success: #16834A;
   --color-success-soft: #ECFDF3;
   --color-warning: #B54708;
@@ -16,8 +16,9 @@
   --color-danger: #B42318;
   --color-danger-soft: #FEF3F2;
 
-  --font-sans: var(--font-geist-sans), system-ui, -apple-system, sans-serif;
-  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+  --font-sans: var(--font-sans), system-ui, -apple-system, sans-serif;
+  --font-display: var(--font-display), system-ui, -apple-system, sans-serif;
+  --font-mono: var(--font-mono), ui-monospace, monospace;
 }
 
 @layer base {
@@ -26,11 +27,17 @@
     color: var(--color-ink);
     font-family: var(--font-sans);
     -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
 
   body {
-    background-color: var(--color-warm);
+    background: radial-gradient(circle at top right, #FFF1E6 0%, #FFF8F3 42%, #FFFDFB 100%);
     color: var(--color-ink);
     min-height: 100vh;
+  }
+
+  h1, h2, h3, .font-display {
+    font-family: var(--font-display);
+    letter-spacing: -0.025em;
   }
 }
