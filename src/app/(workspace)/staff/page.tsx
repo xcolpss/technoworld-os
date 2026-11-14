@@ -40,7 +40,7 @@ export default async function StaffPage() {
         phone: e.phone ? String(e.phone) : null,
         designation: String(e.designation || 'Staff'),
         department: e.department ? String(e.department) : null,
-        employment_status: e.employment_status,
+        employment_status: String(e.employment_status || 'active'),
         assigned_shift_type: String(e.assigned_shift_type || 'Morning'),
         salary_type: String(e.salary_type || 'Daily'),
         salary_amount_paisa: Number(e.salary_amount_paisa || 0),
