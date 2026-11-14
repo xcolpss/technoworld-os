@@ -153,10 +153,35 @@ export default async function DashboardPage({
 
   return (
     <div className="space-y-6 pb-12 max-w-7xl mx-auto">
+
+      {/* DAILY CLOSING & ACCOUNTANT SUITE PROMINENT CARD */}
+      <Card className="border-[var(--primary)]/40 bg-[var(--primary)]/5 shadow-xs">
+        <CardContent className="p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+          <div className="flex items-center gap-4">
+            <div className="h-12 w-12 rounded-2xl bg-[var(--primary)] text-white flex items-center justify-center font-black text-lg shadow-sm">
+              <span className="font-mono">DC</span>
+            </div>
+            <div>
+              <h3 className="font-display text-base font-extrabold text-[var(--foreground)]">Daily Closing &amp; Accountant Reports</h3>
+              <p className="text-xs text-[var(--foreground-secondary)] mt-0.5">Prepare daily accounts, record wages and expenses, reconcile cash, and export your daily report.</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-3 w-full sm:w-auto">
+            <Link href="/dashboard/closing" className="w-full sm:w-auto">
+              <Button className="w-full bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white font-bold text-xs gap-2">
+                Create Daily Closing <ArrowRight className="h-4 w-4" />
+              </Button>
+            </Link>
+          </div>
+        </CardContent>
+      </Card>
+    
+      {/* EXISTING KPI CARDS */}
+
       {/* SECTION 1: Header & Global Date Filter */}
       <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
         <PageHeader
-          eyebrow="TechnoWorld OS • Business Intelligence &amp; Executive Dashboard"
+          eyebrow="TechnoWorld OS â€¢ Business Intelligence &amp; Executive Dashboard"
           title="Owner Dashboard &amp; Analytics"
           description="Comprehensive real-time financial tracking, shift audits, FIFO inventory intelligence, and financial liquidity."
         />
@@ -272,7 +297,7 @@ export default async function DashboardPage({
             <div className="flex items-center justify-between border-b border-[var(--border)] pb-3">
               <div className="flex items-center gap-2.5">
                 <Clock className="h-5 w-5 text-[var(--primary)]" />
-                <h3 className="font-display text-base font-extrabold text-[var(--foreground)]">Morning Shift (08:00 – 16:00)</h3>
+                <h3 className="font-display text-base font-extrabold text-[var(--foreground)]">Morning Shift (08:00 â€“ 16:00)</h3>
               </div>
               <Badge variant="brand" className="font-mono text-xs">Active Shift</Badge>
             </div>
@@ -294,7 +319,7 @@ export default async function DashboardPage({
             <div className="flex items-center justify-between border-b border-[var(--border)] pb-3">
               <div className="flex items-center gap-2.5">
                 <Clock className="h-5 w-5 text-[var(--primary)]" />
-                <h3 className="font-display text-base font-extrabold text-[var(--foreground)]">Evening Shift (16:00 – 00:00)</h3>
+                <h3 className="font-display text-base font-extrabold text-[var(--foreground)]">Evening Shift (16:00 â€“ 00:00)</h3>
               </div>
               <Badge variant="success" className="font-mono text-xs">Audited</Badge>
             </div>

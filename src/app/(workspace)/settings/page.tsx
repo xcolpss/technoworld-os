@@ -7,18 +7,30 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Printer, Shield, Moon, Sun, Monitor, CheckCircle2, Store } from "lucide-react";
+import { Printer, Shield, Moon, Sun, Monitor, CheckCircle2, Store, Clock } from "lucide-react";
 
 export default function SettingsPage() {
   const [themeMode, setThemeMode] = useState<"light" | "dark" | "system">("light");
   const [shopName, setShopName] = useState("TechnoWorld OS • Rawalpindi");
   const [printerWidth, setPrinterWidth] = useState("80mm");
+  const [morningShiftStart, setMorningShiftStart] = useState("08:00");
+  const [morningShiftEnd, setMorningShiftEnd] = useState("16:00");
+  const [eveningShiftStart, setEveningShiftStart] = useState("16:00");
+  const [eveningShiftEnd, setEveningShiftEnd] = useState("00:00");
   const [saved, setSaved] = useState(false);
 
   useEffect(() => {
     const savedTheme = (localStorage.getItem("tw_theme_mode") as "light" | "dark" | "system") || "light";
     setThemeMode(savedTheme);
-    applyTheme(savedTheme);
+
+    const savedMorningStart = localStorage.getItem("tw_morning_start");
+    const savedMorningEnd = localStorage.getItem("tw_morning_end");
+    const savedEveningStart = localStorage.getItem("tw_evening_start");
+    const savedEveningEnd = localStorage.getItem("tw_evening_end");
+    if (savedMorningStart) setMorningShiftStart(savedMorningStart);
+    if (savedMorningEnd) setMorningShiftEnd(savedMorningEnd);
+    if (savedEveningStart) setEveningShiftStart(savedEveningStart);
+    if (savedEveningEnd) setEveningShiftEnd(savedEveningEnd);
   }, []);
 
   const applyTheme = (mode: "light" | "dark" | "system") => {
@@ -38,6 +50,11 @@ export default function SettingsPage() {
 
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
+    localStorage.setItem("tw_morning_start", morningShiftStart);
+    localStorage.setItem("tw_morning_end", morningShiftEnd);
+    localStorage.setItem("tw_evening_start", eveningShiftStart);
+    localStorage.setItem("tw_evening_end", eveningShiftEnd);
+    
     setSaved(true);
     setTimeout(() => setSaved(false), 3000);
   };
@@ -47,19 +64,20 @@ export default function SettingsPage() {
       <PageHeader
         eyebrow="TechnoWorld OS • System Configuration &amp; Preferences"
         title="System Settings"
-        description="Configure shop terminals, thermal receipt printers, currency preferences, and centralized theme appearance."
+        description="Configure shop operating timings, shift hours, thermal printers, currency preferences, and centralized theme appearance."
       />
 
       {saved && (
         <Card className="border-[var(--success)]/30 bg-[var(--success)]/10 shadow-xs">
           <CardContent className="p-4 flex items-center gap-3 text-[var(--success)]">
             <CheckCircle2 className="h-5 w-5 shrink-0" />
-            <span className="text-xs font-bold">Settings and theme preferences saved successfully! Applied instantly.</span>
+            <span className="text-xs font-bold">Settings, operating timings, and theme preferences saved successfully!</span>
           </CardContent>
         </Card>
       )}
 
       <form onSubmit={handleSave} className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Appearance & Theme Settings */}
         <Card className="border-[var(--border)] bg-[var(--surface)] shadow-xs">
           <CardContent className="p-6 space-y-4">
             <div className="flex items-center gap-2.5 border-b border-[var(--border)] pb-3">
@@ -73,21 +91,21 @@ export default function SettingsPage() {
                 <button
                   type="button"
                   onClick={() => applyTheme("light")}
-                  className={`flex flex-col items-center justify-center gap-2 p-3 rounded-2xl border font-bold transition ${themeMode === "light" ? "border-[var(--primary)] bg-[var(--primary)]/10 text-[var(--primary)] shadow-xs" : "border-[var(--border)] bg-[var(--surface-secondary)] text-[var(--foreground-secondary)] hover:text-[var(--foreground)]"}`}
+                  className={`flex flex-col items-center justify-center gap-2 p-3 rounded-2xl border font-bold transition cursor-pointer ${themeMode === "light" ? "border-[var(--primary)] bg-[var(--primary)]/10 text-[var(--primary)] shadow-xs" : "border-[var(--border)] bg-[var(--surface-secondary)] text-[var(--foreground-secondary)] hover:text-[var(--foreground)]"}`}
                 >
                   <Sun className="h-4 w-4" /> Light
                 </button>
                 <button
                   type="button"
                   onClick={() => applyTheme("dark")}
-                  className={`flex flex-col items-center justify-center gap-2 p-3 rounded-2xl border font-bold transition ${themeMode === "dark" ? "border-[var(--primary)] bg-[var(--primary)]/10 text-[var(--primary)] shadow-xs" : "border-[var(--border)] bg-[var(--surface-secondary)] text-[var(--foreground-secondary)] hover:text-[var(--foreground)]"}`}
+                  className={`flex flex-col items-center justify-center gap-2 p-3 rounded-2xl border font-bold transition cursor-pointer ${themeMode === "dark" ? "border-[var(--primary)] bg-[var(--primary)]/10 text-[var(--primary)] shadow-xs" : "border-[var(--border)] bg-[var(--surface-secondary)] text-[var(--foreground-secondary)] hover:text-[var(--foreground)]"}`}
                 >
                   <Moon className="h-4 w-4" /> Dark
                 </button>
                 <button
                   type="button"
                   onClick={() => applyTheme("system")}
-                  className={`flex flex-col items-center justify-center gap-2 p-3 rounded-2xl border font-bold transition ${themeMode === "system" ? "border-[var(--primary)] bg-[var(--primary)]/10 text-[var(--primary)] shadow-xs" : "border-[var(--border)] bg-[var(--surface-secondary)] text-[var(--foreground-secondary)] hover:text-[var(--foreground)]"}`}
+                  className={`flex flex-col items-center justify-center gap-2 p-3 rounded-2xl border font-bold transition cursor-pointer ${themeMode === "system" ? "border-[var(--primary)] bg-[var(--primary)]/10 text-[var(--primary)] shadow-xs" : "border-[var(--border)] bg-[var(--surface-secondary)] text-[var(--foreground-secondary)] hover:text-[var(--foreground)]"}`}
                 >
                   <Monitor className="h-4 w-4" /> System
                 </button>
@@ -96,6 +114,62 @@ export default function SettingsPage() {
           </CardContent>
         </Card>
 
+        {/* Operating Timings & Shift Hours */}
+        <Card className="border-[var(--border)] bg-[var(--surface)] shadow-xs">
+          <CardContent className="p-6 space-y-4">
+            <div className="flex items-center gap-2.5 border-b border-[var(--border)] pb-3">
+              <Clock className="h-5 w-5 text-[var(--primary)]" />
+              <h3 className="font-display text-base font-extrabold text-[var(--foreground)]">Operating Timings &amp; Shifts</h3>
+            </div>
+            <div className="space-y-3.5 text-xs">
+              <p className="text-[11px] text-[var(--foreground-secondary)]">Define shop operational hours and shift timings in Asia/Karachi (PKT).</p>
+              
+              <div className="grid grid-cols-2 gap-3 p-3 rounded-xl bg-[var(--surface-secondary)]">
+                <div>
+                  <Label>Morning Shift Start</Label>
+                  <input 
+                    type="time" 
+                    value={morningShiftStart} 
+                    onChange={e => setMorningShiftStart(e.target.value)} 
+                    className="mt-1 h-9 w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 font-mono font-bold text-[var(--foreground)]"
+                  />
+                </div>
+                <div>
+                  <Label>Morning Shift End</Label>
+                  <input 
+                    type="time" 
+                    value={morningShiftEnd} 
+                    onChange={e => setMorningShiftEnd(e.target.value)} 
+                    className="mt-1 h-9 w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 font-mono font-bold text-[var(--foreground)]"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3 p-3 rounded-xl bg-[var(--surface-secondary)]">
+                <div>
+                  <Label>Evening Shift Start</Label>
+                  <input 
+                    type="time" 
+                    value={eveningShiftStart} 
+                    onChange={e => setEveningShiftStart(e.target.value)} 
+                    className="mt-1 h-9 w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 font-mono font-bold text-[var(--foreground)]"
+                  />
+                </div>
+                <div>
+                  <Label>Evening Shift End</Label>
+                  <input 
+                    type="time" 
+                    value={eveningShiftEnd} 
+                    onChange={e => setEveningShiftEnd(e.target.value)} 
+                    className="mt-1 h-9 w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 font-mono font-bold text-[var(--foreground)]"
+                  />
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Shop & Terminal Configuration */}
         <Card className="border-[var(--border)] bg-[var(--surface)] shadow-xs">
           <CardContent className="p-6 space-y-4">
             <div className="flex items-center gap-2.5 border-b border-[var(--border)] pb-3">
@@ -121,6 +195,7 @@ export default function SettingsPage() {
           </CardContent>
         </Card>
 
+        {/* Thermal Receipt Printer Setup */}
         <Card className="border-[var(--border)] bg-[var(--surface)] shadow-xs">
           <CardContent className="p-6 space-y-4">
             <div className="flex items-center gap-2.5 border-b border-[var(--border)] pb-3">
@@ -143,33 +218,10 @@ export default function SettingsPage() {
           </CardContent>
         </Card>
 
-        <Card className="border-[var(--border)] bg-[var(--surface)] shadow-xs">
-          <CardContent className="p-6 space-y-4">
-            <div className="flex items-center gap-2.5 border-b border-[var(--border)] pb-3">
-              <Shield className="h-5 w-5 text-[var(--primary)]" />
-              <h3 className="font-display text-base font-extrabold text-[var(--foreground)]">Security &amp; Permissions</h3>
-            </div>
-            <div className="space-y-3 text-xs">
-              <div className="flex items-center justify-between p-3.5 rounded-2xl bg-[var(--surface-secondary)]">
-                <div>
-                  <p className="font-bold text-[var(--foreground)]">Owner Financial Lockdown</p>
-                  <p className="text-[10px] text-[var(--foreground-secondary)]">Restrict P&amp;L and owner accounts to authorized admins.</p>
-                </div>
-                <Badge variant="success" className="px-3 py-1">Enabled</Badge>
-              </div>
-              <div className="flex items-center justify-between p-3.5 rounded-2xl bg-[var(--surface-secondary)]">
-                <div>
-                  <p className="font-bold text-[var(--foreground)]">Cloud Supabase Sync</p>
-                  <p className="text-[10px] text-[var(--foreground-secondary)]">Real-time database replication active.</p>
-                </div>
-                <Badge variant="success" className="px-3 py-1">Connected</Badge>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
         <div className="lg:col-span-2 flex justify-end pt-2">
-          <Button type="submit" size="lg" className="px-8 font-extrabold shadow-sm bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white">Save Configuration</Button>
+          <Button type="submit" size="lg" className="px-8 font-extrabold shadow-sm bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white cursor-pointer">
+            Save All Configurations
+          </Button>
         </div>
       </form>
     </div>

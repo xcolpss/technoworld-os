@@ -1,41 +1,38 @@
 import type { Metadata } from "next";
-import { Plus_Jakarta_Sans, Inter, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
-
-const jakarta = Plus_Jakarta_Sans({
-  variable: "--font-jakarta",
-  subsets: ["latin"],
-  weight: ["600", "700", "800"],
-});
-
-const inter = Inter({
-  variable: "--font-inter",
-  subsets: ["latin"],
-  weight: ["400", "500", "600", "700"],
-});
-
-const jetbrainsMono = JetBrains_Mono({
-  variable: "--font-jetbrains",
-  subsets: ["latin"],
-  weight: ["500", "600"],
-});
+import { ThemeSync } from "@/components/theme-sync";
 
 export const metadata: Metadata = {
-  title: "TechnoWorld OS — Retail & Computer Services Management",
-  description:
-    "Business management, POS, inventory, shift, and financial operating system for TechnoWorld.",
+  title: "TechnoWorld OS — POS & Business Intelligence",
+  description: "Retail management platform for TechnoWorld Rawalpindi",
 };
 
 export default function RootLayout({
   children,
-}: Readonly<{
+}: {
   children: React.ReactNode;
-}>) {
+}) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <body
-        className={`${jakarta.variable} ${inter.variable} ${jetbrainsMono.variable} font-sans antialiased`}
-      >
+      <head>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `
+              try {
+                const mode = localStorage.getItem('tw_theme_mode') || 'light';
+                const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+                if (mode === 'dark' || (mode === 'system' && prefersDark)) {
+                  document.documentElement.classList.add('dark');
+                } else {
+                  document.documentElement.classList.remove('dark');
+                }
+              } catch (e) {}
+            `,
+          }}
+        />
+      </head>
+      <body className="bg-[var(--background)] text-[var(--foreground)] antialiased transition-colors duration-200">
+        <ThemeSync />
         {children}
       </body>
     </html>
