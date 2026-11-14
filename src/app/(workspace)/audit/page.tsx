@@ -24,7 +24,7 @@ export default async function AuditPage() {
   return (
     <div className="space-y-6 pb-12 max-w-7xl mx-auto px-4 sm:px-6">
       <PageHeader
-        eyebrow="TechnoWorld OS Ã¢â‚¬Â¢ Security &amp; Compliance"
+        eyebrow="TechnoWorld OS ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¢ Security &amp; Compliance"
         title="Audit Trail &amp; Immutable Logs"
         description="Secure chronological ledger tracking sensitive actions, owner capital inputs, household withdrawals, and financial transfers."
       />
