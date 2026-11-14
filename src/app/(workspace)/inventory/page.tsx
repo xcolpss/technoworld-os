@@ -1,43 +1,65 @@
-﻿import { Badge } from "@/components/ui/badge";
+import { redirect } from "next/navigation";
+import { PageHeader } from "@/components/ui/page-header";
+import { InventoryManager, type InventoryItemRecord, type CategoryRecord } from "@/components/inventory/inventory-manager";
+import { getAuthenticatedShopContext } from "@/lib/auth/session";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { EmptyState } from "@/components/ui/states";
+  createCategoryAction,
+  updateCategoryAction,
+  deleteCategoryAction,
+  createInventoryItemAction,
+  updateInventoryItemAction,
+  adjustStockAction,
+  deleteInventoryItemAction,
+} from "@/app/(workspace)/inventory/actions";
 
-export default function ModulePage() {
+export default async function InventoryPage() {
+  const ctx = await getAuthenticatedShopContext();
+  if (!ctx || !ctx.businessId) redirect("/login");
+
+  const admin = createSupabaseAdminClient();
+  const [{ data: rawCats }, { data: rawItems }] = await Promise.all([
+    admin.from("inventory_categories").select("*").eq("business_id", ctx.businessId).order("name", { ascending: true }),
+    admin.from("inventory_items").select("*").eq("business_id", ctx.businessId).order("name", { ascending: true }),
+  ]);
+
+  const categories: CategoryRecord[] = (rawCats ?? []).map((c: Record<string, unknown>) => ({
+    id: String(c.id),
+    name: String(c.name ?? ""),
+  }));
+
+  const items: InventoryItemRecord[] = (rawItems ?? []).map((i: Record<string, unknown>) => ({
+    id: String(i.id),
+    name: String(i.name ?? ""),
+    sku: i.sku ? String(i.sku) : null,
+    category: String(i.category ?? "General"),
+    stock_quantity: Number(i.stock_quantity ?? 0),
+    cost_price_paisa: Number(i.cost_price_paisa ?? 0),
+    retail_price_paisa: Number(i.retail_price_paisa ?? 0),
+    min_stock_alert: Number(i.min_stock_alert ?? 5),
+    unit: String(i.unit ?? "pcs"),
+    notes: i.notes ? String(i.notes) : null,
+  }));
+
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <div className="flex items-center gap-2.5">
-            <h1 className="text-2xl font-bold tracking-tight text-ink">
-              Inventory Management
-            </h1>
-            <Badge variant="neutral">Module Shell Ready</Badge>
-          </div>
-          <p className="mt-1 text-sm text-muted">Stock lots, accessories tracking, purchases, and supplier records.</p>
-        </div>
-      </div>
+      <PageHeader
+        eyebrow="Stock Control & Warehousing"
+        title="Inventory Intelligence Center"
+        description="Manage product categories, stock quantities, SKU assets, valuation, and rapid inventory adjustments."
+      />
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Inventory Management — Foundation Ready</CardTitle>
-          <CardDescription>
-            Navigation, layout, and role access route are verified. Business
-            logic and database tables will be connected in upcoming milestones.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <EmptyState
-            title="Awaiting Database & Module Activation"
-            description="No placeholder data is displayed here. Once the PostgreSQL schema and module rules are implemented, live records will appear automatically."
-          />
-        </CardContent>
-      </Card>
+      <InventoryManager
+        categories={categories}
+        items={items}
+        onCreateCategory={createCategoryAction}
+        onUpdateCategory={updateCategoryAction}
+        onDeleteCategory={deleteCategoryAction}
+        onCreateItem={createInventoryItemAction}
+        onUpdateItem={updateInventoryItemAction}
+        onAdjustStock={adjustStockAction}
+        onDeleteItem={deleteInventoryItemAction}
+      />
     </div>
   );
 }
