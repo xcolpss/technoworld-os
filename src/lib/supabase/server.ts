@@ -1,19 +1,19 @@
 ﻿import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
+import { getSupabaseBrowserEnv } from "@/lib/supabase/env";
 
 export async function createSupabaseServerClient() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  // Always read cookies first so this route is treated as dynamic on Vercel.
+  const cookieStore = await cookies();
+  const env = getSupabaseBrowserEnv();
 
-  if (!url || !anonKey) {
+  if (!env) {
     throw new Error(
-      "Supabase environment variables are not configured yet. Add NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY to .env.local."
+      "Supabase environment variables are not configured yet. Add NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY in Vercel Project Settings (or .env.local locally)."
     );
   }
 
-  const cookieStore = await cookies();
-
-  return createServerClient(url, anonKey, {
+  return createServerClient(env.url, env.anonKey, {
     cookies: {
       getAll() {
         return cookieStore.getAll();

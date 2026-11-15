@@ -1,6 +1,11 @@
 ﻿import { cache } from "react";
+import { cookies } from "next/headers";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import {
+  getSupabaseBrowserEnv,
+  getSupabaseServiceRoleKey,
+} from "@/lib/supabase/env";
 import { UserRole } from "@/types/system";
 
 export interface AuthenticatedShopContext {
@@ -14,6 +19,13 @@ export interface AuthenticatedShopContext {
 
 export const getAuthenticatedShopContext = cache(
   async (): Promise<AuthenticatedShopContext | null> => {
+    // Mark the route dynamic even when env vars are missing at build time.
+    await cookies();
+
+    if (!getSupabaseBrowserEnv() || !getSupabaseServiceRoleKey()) {
+      return null;
+    }
+
     const supabase = await createSupabaseServerClient();
     const {
       data: { session },
