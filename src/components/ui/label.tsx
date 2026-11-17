@@ -1,13 +1,16 @@
 import * as React from "react";
-import { cn } from "@/lib/utils";
+import { twMerge } from "tailwind-merge";
 
-export interface LabelProps extends React.LabelHTMLAttributes<HTMLLabelElement> {}
+export type LabelProps = React.LabelHTMLAttributes<HTMLLabelElement>;
 
 export const Label = React.forwardRef<HTMLLabelElement, LabelProps>(
   ({ className, ...props }, ref) => (
     <label
       ref={ref}
-      className={cn("text-xs font-bold text-ink cursor-pointer select-none", className)}
+      className={twMerge(
+        "text-xs font-semibold tracking-tight text-[var(--foreground-secondary)] cursor-pointer select-none",
+        className
+      )}
       {...props}
     />
   )

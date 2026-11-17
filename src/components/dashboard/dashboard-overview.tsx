@@ -31,6 +31,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input, Label } from "@/components/ui/input";
+import { MetricBarChart } from "@/components/ui/mini-charts";
 import { formatPkr } from "@/lib/format/currency";
 
 export interface DashboardMetrics {
@@ -127,14 +128,14 @@ export function DashboardOverview({
   return (
     <div className="space-y-6">
       {/* 1. GLOBAL DATE FILTER BAR */}
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-border bg-surface p-4 shadow-xs">
+      <div className="glass-panel flex flex-wrap items-center justify-between gap-3 rounded-2xl border p-4">
         <div className="flex items-center gap-2">
           <Calendar className="h-5 w-5 text-brand" />
           <div>
             <h3 className="font-display text-sm font-extrabold text-ink">
               Reporting Period: <span className="text-brand">{metrics.periodLabel}</span>
             </h3>
-            <p className="text-xs text-muted">Asia/Karachi Timezone â€¢ Monday Week Start</p>
+            <p className="text-xs text-muted">Asia/Karachi Timezone • Monday Week Start</p>
           </div>
         </div>
 
@@ -171,56 +172,56 @@ export function DashboardOverview({
           onSubmit={handleCustomRangeSubmit}
           className="flex flex-wrap items-center gap-3 rounded-2xl border border-brand/40 bg-brand-soft/20 p-4"
         >
-          <div className="flex items-center gap-2">
-            <Label className="text-xs font-bold">Start:</Label>
+          <div className="flex items-center gap-2 w-full sm:w-auto">
+            <Label className="text-xs font-bold w-12 sm:w-auto">Start:</Label>
             <Input
               type="date"
               value={startDate}
               onChange={(e) => setStartDate(e.target.value)}
-              className="h-9 text-xs font-mono"
+              className="h-9 text-xs font-mono flex-1 sm:w-auto"
               required
             />
           </div>
-          <div className="flex items-center gap-2">
-            <Label className="text-xs font-bold">End:</Label>
+          <div className="flex items-center gap-2 w-full sm:w-auto">
+            <Label className="text-xs font-bold w-12 sm:w-auto">End:</Label>
             <Input
               type="date"
               value={endDate}
               onChange={(e) => setEndDate(e.target.value)}
-              className="h-9 text-xs font-mono"
+              className="h-9 text-xs font-mono flex-1 sm:w-auto"
               required
             />
           </div>
-          <Button type="submit" size="sm">
+          <Button type="submit" size="sm" className="w-full sm:w-auto">
             Apply Date Range
           </Button>
         </form>
       )}
 
       {/* Quick Action Navigation Bar */}
-      <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
+      <div className="grid grid-cols-1 min-[400px]:grid-cols-2 gap-2.5 sm:grid-cols-4">
         <Link href="/pos">
           <Button className="h-11 w-full text-xs sm:text-sm font-extrabold shadow-sm">
-            <ShoppingBag className="h-4 w-4" />
-            Open POS Counter
+            <ShoppingBag className="h-4 w-4 shrink-0" />
+            <span className="truncate">Open POS Counter</span>
           </Button>
         </Link>
         <Link href="/expenses">
           <Button  className="h-11 w-full text-xs sm:text-sm font-extrabold">
-            <ReceiptText className="h-4 w-4" />
-            Expenses &amp; Vault
+            <ReceiptText className="h-4 w-4 shrink-0" />
+            <span className="truncate">Expenses &amp; Vault</span>
           </Button>
         </Link>
         <Link href="/customers">
           <Button  className="h-11 w-full text-xs sm:text-sm font-extrabold">
-            <UserCheck className="h-4 w-4" />
-            Udhaar Ledger
+            <UserCheck className="h-4 w-4 shrink-0" />
+            <span className="truncate">Udhaar Ledger</span>
           </Button>
         </Link>
         <Link href="/shifts">
           <Button  className="h-11 w-full text-xs sm:text-sm font-extrabold">
-            <Monitor className="h-4 w-4" />
-            Counter Shifts
+            <Monitor className="h-4 w-4 shrink-0" />
+            <span className="truncate">Counter Shifts</span>
           </Button>
         </Link>
       </div>
@@ -354,10 +355,10 @@ export function DashboardOverview({
             Shift Performance (Morning vs. Evening)
           </h2>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <Card className="border-brand/40 bg-brand-soft/10">
               <CardContent className="p-4 space-y-1">
-                <span className="text-xs font-bold text-muted">Morning Shift (08:00â€“16:00)</span>
+                <span className="text-xs font-bold text-muted">Morning Shift (08:00–16:00)</span>
                 <p className="font-mono text-xl font-extrabold text-brand-dark">
                   {formatPkr(metrics.morningRevenuePaisa)}
                 </p>
@@ -367,7 +368,7 @@ export function DashboardOverview({
 
             <Card className="border-brand/40 bg-brand-soft/10">
               <CardContent className="p-4 space-y-1">
-                <span className="text-xs font-bold text-muted">Evening Shift (16:00â€“00:00)</span>
+                <span className="text-xs font-bold text-muted">Evening Shift (16:00–00:00)</span>
                 <p className="font-mono text-xl font-extrabold text-brand-dark">
                   {formatPkr(metrics.eveningRevenuePaisa)}
                 </p>
@@ -376,7 +377,7 @@ export function DashboardOverview({
             </Card>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <Card>
               <CardContent className="p-4 space-y-1">
                 <span className="text-xs font-bold text-muted flex items-center gap-1">
@@ -413,21 +414,33 @@ export function DashboardOverview({
               {categories.length === 0 ? (
                 <p className="py-8 text-center text-xs text-muted">No category data recorded for this period.</p>
               ) : (
-                <div className="space-y-3">
-                  {categories.map((cat) => (
-                    <div key={cat.category} className="flex items-center justify-between border-b border-border pb-2.5 text-xs">
-                      <div>
-                        <p className="font-bold text-ink">{cat.category}</p>
-                        <p className="text-[11px] text-muted">
-                          {cat.txCount} txns â€¢ {cat.quantitySold} units sold
-                        </p>
+                <div className="space-y-4">
+                  <MetricBarChart
+                    title="Category Revenue Mix"
+                    height={150}
+                    data={categories.slice(0, 6).map((cat, idx) => ({
+                      label: cat.category,
+                      value: cat.revenuePaisa,
+                      formattedValue: formatPkr(cat.revenuePaisa),
+                      tone: idx % 3 === 0 ? "brand" : idx % 3 === 1 ? "success" : "info",
+                    }))}
+                  />
+                  <div className="space-y-2.5 pt-2">
+                    {categories.map((cat) => (
+                      <div key={cat.category} className="flex items-center justify-between border-b border-border pb-2.5 text-xs">
+                        <div>
+                          <p className="font-bold text-ink">{cat.category}</p>
+                          <p className="text-[11px] text-muted">
+                            {cat.txCount} txns • {cat.quantitySold} units sold
+                          </p>
+                        </div>
+                        <div className="text-right font-mono">
+                          <p className="font-extrabold text-brand-dark">{formatPkr(cat.revenuePaisa)}</p>
+                          <p className="text-[11px] text-success">GP: {formatPkr(cat.grossProfitPaisa)}</p>
+                        </div>
                       </div>
-                      <div className="text-right font-mono">
-                        <p className="font-extrabold text-brand-dark">{formatPkr(cat.revenuePaisa)}</p>
-                        <p className="text-[11px] text-success">GP: {formatPkr(cat.grossProfitPaisa)}</p>
-                      </div>
-                    </div>
-                  ))}
+                    ))}
+                  </div>
                 </div>
               )}
             </CardContent>
@@ -462,7 +475,7 @@ export function DashboardOverview({
                       <div className="space-y-0.5 min-w-0">
                         <p className="font-bold text-ink truncate">{p.name}</p>
                         <p className="text-[11px] text-muted">
-                          {p.category} â€¢ Sold: <strong className="text-brand">{p.unitsSold}</strong> â€¢ Margin: <strong className="text-success">{p.marginPercent.toFixed(1)}%</strong>
+                          {p.category} • Sold: <strong className="text-brand">{p.unitsSold}</strong> • Margin: <strong className="text-success">{p.marginPercent.toFixed(1)}%</strong>
                         </p>
                       </div>
                     </div>
@@ -517,7 +530,7 @@ export function DashboardOverview({
                   <div key={act.id} className="flex items-center justify-between border-b border-border pb-2 text-xs">
                     <div>
                       <p className="font-bold text-ink">{act.title}</p>
-                      <p className="text-[10px] text-muted">{act.subtitle} â€¢ {act.timePk}</p>
+                      <p className="text-[10px] text-muted">{act.subtitle} • {act.timePk}</p>
                     </div>
                     <span className="font-mono font-extrabold text-brand-dark">{formatPkr(act.amountPaisa)}</span>
                   </div>

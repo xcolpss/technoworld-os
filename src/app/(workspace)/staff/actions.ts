@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { getAuthenticatedShopContext } from "@/lib/auth/session";
+import { assertAuthorizedRole } from "@/lib/auth/permissions";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
 export interface EmployeePayload {
@@ -33,6 +34,7 @@ export interface LeaveRequestPayload {
 export async function createEmployeeAction(payload: EmployeePayload) {
   const ctx = await getAuthenticatedShopContext();
   if (!ctx || !ctx.businessId) redirect("/login");
+  assertAuthorizedRole(ctx.role, ["OWNER", "MANAGER"], "manage staff");
 
   const cleanName = String(payload.fullName || "").trim();
   if (!cleanName) throw new Error("Employee full name is required.");
@@ -69,6 +71,7 @@ export async function createEmployeeAction(payload: EmployeePayload) {
 export async function updateEmployeeAction(employeeId: string, payload: EmployeePayload) {
   const ctx = await getAuthenticatedShopContext();
   if (!ctx || !ctx.businessId) redirect("/login");
+  assertAuthorizedRole(ctx.role, ["OWNER", "MANAGER"], "manage staff");
 
   const admin = createSupabaseAdminClient();
   const { error } = await admin
@@ -96,6 +99,7 @@ export async function updateEmployeeAction(employeeId: string, payload: Employee
 export async function updateEmployeeStatusAction(employeeId: string, newStatus: "ACTIVE" | "SUSPENDED" | "DEACTIVATED" | "ARCHIVED") {
   const ctx = await getAuthenticatedShopContext();
   if (!ctx || !ctx.businessId) redirect("/login");
+  assertAuthorizedRole(ctx.role, ["OWNER", "MANAGER"], "manage staff");
 
   const admin = createSupabaseAdminClient();
   const { error } = await admin
@@ -111,6 +115,7 @@ export async function updateEmployeeStatusAction(employeeId: string, newStatus: 
 export async function deleteEmployeeAction(employeeId: string) {
   const ctx = await getAuthenticatedShopContext();
   if (!ctx || !ctx.businessId) redirect("/login");
+  assertAuthorizedRole(ctx.role, ["OWNER", "MANAGER"], "manage staff");
 
   const admin = createSupabaseAdminClient();
   const { error } = await admin
@@ -126,6 +131,7 @@ export async function deleteEmployeeAction(employeeId: string) {
 export async function checkInEmployeeAction(employeeId: string, workDate: string) {
   const ctx = await getAuthenticatedShopContext();
   if (!ctx || !ctx.businessId) redirect("/login");
+  assertAuthorizedRole(ctx.role, ["OWNER", "MANAGER"], "manage staff");
 
   const admin = createSupabaseAdminClient();
   const now = new Date().toISOString();
@@ -189,6 +195,7 @@ export async function checkInEmployeeAction(employeeId: string, workDate: string
 export async function createLeaveRequestAction(payload: LeaveRequestPayload) {
   const ctx = await getAuthenticatedShopContext();
   if (!ctx || !ctx.businessId) redirect("/login");
+  assertAuthorizedRole(ctx.role, ["OWNER", "MANAGER"], "manage staff");
 
   const admin = createSupabaseAdminClient();
   const { error } = await admin.from("leaves").insert({
@@ -208,6 +215,7 @@ export async function createLeaveRequestAction(payload: LeaveRequestPayload) {
 export async function updateLeaveStatusAction(leaveId: string, status: "APPROVED" | "REJECTED" | "CANCELLED") {
   const ctx = await getAuthenticatedShopContext();
   if (!ctx || !ctx.businessId) redirect("/login");
+  assertAuthorizedRole(ctx.role, ["OWNER", "MANAGER"], "manage staff");
 
   const admin = createSupabaseAdminClient();
   const { error } = await admin

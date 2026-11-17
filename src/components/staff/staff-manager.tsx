@@ -63,21 +63,22 @@ export interface LeaveRecord {
 
 interface StaffManagerProps {
   employees: EmployeeRecord[];
-  attendanceRecords: AttendanceRecord[];
+  attendanceRecords?: AttendanceRecord[];
   leaves: LeaveRecord[];
   todayStr: string;
-  selectedDate: string;
+  selectedDate?: string;
   onCreateEmployee: (payload: EmployeePayload) => Promise<void>;
-  onUpdateEmployee: (id: string, payload: EmployeePayload) => Promise<void>;
-  onDeleteEmployee: (id: string) => Promise<void>;
-  onCheckIn: (employeeId: string, workDate: string) => Promise<void>;
-  onCreateLeave: (payload: LeaveRequestPayload) => Promise<void>;
+  onUpdateEmployee?: (id: string, payload: EmployeePayload) => Promise<void>;
+  onDeleteEmployee?: (id: string) => Promise<void>;
+  onCheckIn: (employeeId: string, workDate?: any) => Promise<void>;
+  onCreateLeave?: (payload: LeaveRequestPayload) => Promise<void>;
   onUpdateLeave: (leaveId: string, status: "APPROVED" | "REJECTED" | "CANCELLED") => Promise<void>;
+  onUpdateStatus?: (employeeId: string, status: any) => Promise<void>;
 }
 
 export function StaffManager({
   employees,
-  attendanceRecords,
+  attendanceRecords = [],
   leaves,
   todayStr,
   selectedDate,
@@ -91,7 +92,7 @@ export function StaffManager({
   const router = useRouter();
   const [activeTab, setActiveTab] = React.useState<"DIRECTORY" | "ATTENDANCE" | "LEAVES" | "PAYROLL">("ATTENDANCE");
   const [search, setSearch] = React.useState("");
-  const [filterDate, setFilterDate] = React.useState(selectedDate);
+  const [filterDate, setFilterDate] = React.useState(selectedDate || todayStr);
 
   // Modals
   const [showAddModal, setShowAddModal] = React.useState(false);
@@ -140,7 +141,7 @@ export function StaffManager({
   }
 
   function formatTime(isoString: string | null) {
-    if (!isoString) return "â€”";
+    if (!isoString) return "—";
     try {
       return new Date(isoString).toLocaleTimeString("en-US", {
         timeZone: "Asia/Karachi",
@@ -197,7 +198,7 @@ export function StaffManager({
         };
 
         if (editingEmployee) {
-          await onUpdateEmployee(editingEmployee.id, payload);
+          if (onUpdateEmployee) await onUpdateEmployee(editingEmployee.id, payload);
           setFeedback({ type: "ok", text: "Employee updated successfully!" });
         } else {
           await onCreateEmployee(payload);
@@ -214,7 +215,7 @@ export function StaffManager({
     if (!confirm("Are you sure you want to delete this employee?")) return;
     startTransition(async () => {
       try {
-        await onDeleteEmployee(id);
+        if (onDeleteEmployee) await onDeleteEmployee(id);
         setFeedback({ type: "ok", text: "Employee removed successfully." });
       } catch (err) {
         setFeedback({ type: "err", text: err instanceof Error ? err.message : "Failed to delete employee." });
@@ -225,7 +226,7 @@ export function StaffManager({
   function handleCheckInClick(empId: string) {
     startTransition(async () => {
       try {
-        await onCheckIn(empId, selectedDate);
+        await onCheckIn(empId, selectedDate || todayStr);
         setFeedback({ type: "ok", text: "Attendance updated successfully!" });
         router.refresh();
       } catch (err) {
@@ -238,13 +239,15 @@ export function StaffManager({
     e.preventDefault();
     startTransition(async () => {
       try {
-        await onCreateLeave({
-          employeeId: leaveEmpId || activeEmployees[0]?.id,
-          leaveType,
-          startDate,
-          endDate,
-          reason: leaveReason,
-        });
+        if (onCreateLeave) {
+          await onCreateLeave({
+            employeeId: leaveEmpId || activeEmployees[0]?.id,
+            leaveType,
+            startDate,
+            endDate,
+            reason: leaveReason,
+          });
+        }
         setShowLeaveModal(false);
         setLeaveReason("");
         setFeedback({ type: "ok", text: "Leave request submitted successfully!" });
@@ -257,7 +260,7 @@ export function StaffManager({
   return (
     <div className="space-y-6">
       {/* Top Summary Cards */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <div className="grid grid-cols-1 min-[380px]:grid-cols-2 gap-3 sm:grid-cols-4">
         <Card className="border-brand/30 bg-brand-soft/10">
           <CardContent className="p-4">
             <div className="flex items-center justify-between">
@@ -291,7 +294,7 @@ export function StaffManager({
           </CardContent>
         </Card>
 
-        <Card className="flex items-center justify-between p-4">
+        <Card className="flex flex-wrap items-center justify-between gap-2 p-4">
           <div>
             <span className="text-xs font-bold text-muted">New Hire</span>
             <p className="text-sm font-bold text-ink">Add Employee</p>
@@ -310,7 +313,7 @@ export function StaffManager({
       )}
 
       {/* Navigation Tabs */}
-      <div className="flex rounded-2xl border border-border bg-surface p-1.5 shadow-xs">
+      <div className="glass-panel grid grid-cols-2 sm:flex rounded-2xl border p-1.5 gap-1">
         {(
           [
             { id: "DIRECTORY", label: "Employee Directory" },
@@ -323,7 +326,11 @@ export function StaffManager({
             key={t.id}
             type="button"
             onClick={() => setActiveTab(t.id)}
-            className={`flex-1 rounded-xl py-2 text-xs font-extrabold transition ${activeTab === t.id ? "bg-brand text-white shadow-xs" : "text-muted hover:text-ink"}`}
+            className={`flex-1 rounded-xl py-2.5 px-2 text-xs font-extrabold transition-all duration-200 cursor-pointer ${
+              activeTab === t.id
+                ? "bg-gradient-to-r from-[#FF7B1C] to-[#FF6A00] text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.28),0_4px_12px_-2px_rgba(255,106,0,0.35)]"
+                : "text-[var(--foreground-secondary)] hover:text-[var(--foreground)] hover:bg-[var(--warm)]"
+            }`}
           >
             {t.label}
           </button>
@@ -388,7 +395,7 @@ export function StaffManager({
               <h3 className="font-display text-sm font-extrabold text-ink">Attendance Log &amp; Check-In History</h3>
               <p className="text-xs text-muted">Select any date to view exact arrival and departure times or record attendance.</p>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
               <Label className="text-xs font-bold text-muted flex items-center gap-1">
                 <Filter className="h-3.5 w-3.5 text-brand" /> Date Filter:
               </Label>
@@ -396,7 +403,7 @@ export function StaffManager({
                 type="date"
                 value={filterDate}
                 onChange={handleDateChange}
-                className="h-9 w-auto text-xs font-mono"
+                className="h-9 flex-1 sm:flex-none sm:w-auto text-xs font-mono"
               />
             </div>
           </div>
@@ -408,35 +415,37 @@ export function StaffManager({
 
               return (
                 <Card key={att.employeeId}>
-                  <CardContent className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 text-xs">
-                    <div className="space-y-1">
-                      <div className="flex items-center gap-2">
+                  <CardContent className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4 text-xs">
+                    <div className="space-y-1 min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
                         <span className="font-bold text-ink text-sm">{att.employeeName}</span>
                         <span className="font-mono text-[10px] text-muted">({att.employeeNumber})</span>
                         <Badge variant={isCheckedIn || att.actualOut ? "success" : "warning"}>
                           {isCheckedIn ? "Checked In" : att.actualOut ? "Shift Completed" : "Not Checked In"}
                         </Badge>
                       </div>
-                      <p className="text-muted">{att.designation} â€¢ Shift Window: <strong className="text-ink">{att.shiftWindow}</strong></p>
+                      <p className="text-muted">{att.designation} • Shift Window: <strong className="text-ink">{att.shiftWindow}</strong></p>
                     </div>
 
-                    <div className="flex items-center gap-4">
-                      <div className="text-right space-y-0.5">
-                        <p className="text-[10px] text-muted uppercase tracking-wider">Exact Arrival (In)</p>
-                        <p className="font-mono font-bold text-success">{formatTime(att.actualIn)}</p>
-                      </div>
-                      <div className="text-right space-y-0.5">
-                        <p className="text-[10px] text-muted uppercase tracking-wider">Exact Departure (Out)</p>
-                        <p className="font-mono font-bold text-brand-dark">{formatTime(att.actualOut)}</p>
+                    <div className="flex flex-wrap items-center justify-between sm:justify-end gap-3 sm:gap-4 w-full sm:w-auto pt-2 sm:pt-0 border-t sm:border-t-0 border-border/60">
+                      <div className="flex items-center gap-4">
+                        <div className="text-left sm:text-right space-y-0.5">
+                          <p className="text-[10px] text-muted uppercase tracking-wider">Exact Arrival (In)</p>
+                          <p className="font-mono font-bold text-success">{formatTime(att.actualIn)}</p>
+                        </div>
+                        <div className="text-left sm:text-right space-y-0.5">
+                          <p className="text-[10px] text-muted uppercase tracking-wider">Exact Departure (Out)</p>
+                          <p className="font-mono font-bold text-brand-dark">{formatTime(att.actualOut)}</p>
+                        </div>
                       </div>
 
                       <Button
                         type="button"
                         size="sm"
-                        variant={isCheckedIn ? "secondary" : "default"}
+                        variant={isCheckedIn ? "secondary" : "primary"}
                         onClick={() => handleCheckInClick(att.employeeId)}
                         disabled={isPending}
-                        className="ml-2"
+                        className="sm:ml-2"
                       >
                         {isCheckedIn ? "Check Out" : att.actualOut ? "Re-Check In" : "Check In"}
                       </Button>
@@ -452,7 +461,7 @@ export function StaffManager({
       {/* TAB 3: LEAVE MANAGEMENT */}
       {activeTab === "LEAVES" && (
         <div className="space-y-4">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between gap-2">
             <h3 className="font-display text-sm font-extrabold text-ink">Leave Requests ({leaves.length})</h3>
             <Button type="button" size="sm" onClick={() => setShowLeaveModal(true)}>
               <Plus className="h-4 w-4 mr-1" /> Request Leave
@@ -467,20 +476,20 @@ export function StaffManager({
             <div className="space-y-2.5">
               {leaves.map((l) => (
                 <Card key={l.id}>
-                  <CardContent className="p-4 flex items-center justify-between gap-3 text-xs">
-                    <div className="space-y-1">
-                      <div className="flex items-center gap-2">
+                  <CardContent className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+                    <div className="space-y-1 min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
                         <span className="font-bold text-ink">{l.employeeName}</span>
                         <Badge variant={l.status === "APPROVED" ? "success" : l.status === "REJECTED" ? "danger" : "warning"}>
                           {l.status}
                         </Badge>
                       </div>
-                      <p className="text-muted">Type: {l.leaveType} â€¢ From {l.startDate} to {l.endDate}</p>
-                      <p className="text-ink italic">"{l.reason}"</p>
+                      <p className="text-muted">Type: {l.leaveType} • From {l.startDate} to {l.endDate}</p>
+                      <p className="text-ink italic break-words">"{l.reason}"</p>
                     </div>
 
                     {l.status === "PENDING" && (
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 shrink-0">
                         <Button type="button" size="sm"  onClick={() => startTransition(async () => await onUpdateLeave(l.id, "APPROVED"))}>
                           Approve
                         </Button>
@@ -505,12 +514,12 @@ export function StaffManager({
           <div className="space-y-2">
             {activeEmployees.map((emp) => (
               <Card key={emp.id}>
-                <CardContent className="p-4 flex items-center justify-between gap-3 text-xs">
-                  <div>
+                <CardContent className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+                  <div className="min-w-0">
                     <p className="font-bold text-ink">{emp.full_name} ({emp.employee_number})</p>
-                    <p className="text-muted">Structure: {emp.salary_type} â€¢ Salary: <strong className="font-mono text-brand-dark">{formatPkr(emp.salary_amount_paisa)}</strong></p>
+                    <p className="text-muted">Structure: {emp.salary_type} • Salary: <strong className="font-mono text-brand-dark">{formatPkr(emp.salary_amount_paisa)}</strong></p>
                   </div>
-                  <Button type="button" size="sm"  onClick={() => setSelectedPayslipEmp(emp)}>
+                  <Button type="button" size="sm" variant="secondary" className="w-full sm:w-auto shrink-0" onClick={() => setSelectedPayslipEmp(emp)}>
                     Generate Payslip
                   </Button>
                 </CardContent>
@@ -522,8 +531,8 @@ export function StaffManager({
 
       {/* MODAL: Add / Edit Employee */}
       {showAddModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="w-full max-w-md rounded-2xl border border-border bg-surface p-6 shadow-xl space-y-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm tw-backdrop-in p-3 sm:p-4">
+          <div className="glass-modal w-full max-w-md max-h-[90vh] overflow-y-auto rounded-2xl p-4 sm:p-6 space-y-4">
             <h3 className="font-display text-base font-extrabold text-ink">
               {editingEmployee ? "Edit Employee Details" : "Hire New Employee"}
             </h3>
@@ -534,7 +543,7 @@ export function StaffManager({
                 <Input value={fullName} onChange={(e) => setFullName(e.target.value)} placeholder="e.g. Muhammad Ali" className="mt-1 h-9 text-xs" required />
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 min-[400px]:grid-cols-2 gap-3">
                 <div>
                   <Label className="text-xs">Employee ID</Label>
                   <Input value={empNum} onChange={(e) => setEmpNum(e.target.value)} className="mt-1 h-9 text-xs font-mono" required />
@@ -545,7 +554,7 @@ export function StaffManager({
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 min-[400px]:grid-cols-2 gap-3">
                 <div>
                   <Label className="text-xs">Designation</Label>
                   <Input value={designation} onChange={(e) => setDesignation(e.target.value)} className="mt-1 h-9 text-xs" required />
@@ -553,13 +562,13 @@ export function StaffManager({
                 <div>
                   <Label className="text-xs">Assigned Shift</Label>
                   <select value={shiftType} onChange={(e) => setShiftType(e.target.value)} className="mt-1 h-9 w-full rounded-xl border border-border bg-warm px-2.5 text-xs font-semibold">
-                    <option value="MORNING">Morning (08:00â€“16:00)</option>
-                    <option value="EVENING">Evening (16:00â€“00:00)</option>
+                    <option value="MORNING">Morning (08:00–16:00)</option>
+                    <option value="EVENING">Evening (16:00–00:00)</option>
                   </select>
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 min-[400px]:grid-cols-2 gap-3">
                 <div>
                   <Label className="text-xs">Salary Type</Label>
                   <select value={salaryType} onChange={(e) => setSalaryType(e.target.value)} className="mt-1 h-9 w-full rounded-xl border border-border bg-warm px-2.5 text-xs font-semibold">
@@ -585,8 +594,8 @@ export function StaffManager({
 
       {/* MODAL: Request Leave */}
       {showLeaveModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="w-full max-w-md rounded-2xl border border-border bg-surface p-6 shadow-xl space-y-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm tw-backdrop-in p-3 sm:p-4">
+          <div className="glass-modal w-full max-w-md max-h-[90vh] overflow-y-auto rounded-2xl p-4 sm:p-6 space-y-4">
             <h3 className="font-display text-base font-extrabold text-ink">Submit Leave Request</h3>
 
             <form onSubmit={handleLeaveSubmit} className="space-y-3.5">
@@ -609,7 +618,7 @@ export function StaffManager({
                 </select>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 min-[400px]:grid-cols-2 gap-3">
                 <div>
                   <Label className="text-xs">Start Date</Label>
                   <Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="mt-1 h-9 text-xs font-mono" required />
@@ -636,8 +645,8 @@ export function StaffManager({
 
       {/* MODAL: Payslip View */}
       {selectedPayslipEmp && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="w-full max-w-md rounded-2xl border border-border bg-surface p-6 shadow-xl space-y-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm tw-backdrop-in p-3 sm:p-4">
+          <div className="glass-modal w-full max-w-md max-h-[90vh] overflow-y-auto rounded-2xl p-4 sm:p-6 space-y-4">
             <div className="flex items-center justify-between border-b border-border pb-3">
               <div>
                 <h3 className="font-display text-base font-extrabold text-ink">Techno World Payslip</h3>

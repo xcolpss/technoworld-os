@@ -2,6 +2,8 @@ import { redirect } from "next/navigation";
 import { PageHeader } from "@/components/ui/page-header";
 import { StaffManager, type EmployeeRecord, type AttendanceRecord, type LeaveRecord } from "@/components/staff/staff-manager";
 import { getAuthenticatedShopContext } from "@/lib/auth/session";
+import { hasRequiredRole } from "@/lib/auth/permissions";
+import { AccessRestricted } from "@/components/auth/access-restricted";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import {
   createEmployeeAction,
@@ -15,6 +17,15 @@ import {
 export default async function EmployeesPage({ searchParams }: { searchParams: Promise<{ date?: string }> }) {
   const ctx = await getAuthenticatedShopContext();
   if (!ctx || !ctx.businessId) redirect("/login");
+  if (!hasRequiredRole(ctx.role, ["OWNER", "MANAGER"])) {
+    return (
+      <AccessRestricted
+        currentRole={ctx.role}
+        requiredRoles={["OWNER", "MANAGER"]}
+        sectionName="Employees & Attendance"
+      />
+    );
+  }
 
   const params = await searchParams;
   const admin = createSupabaseAdminClient();

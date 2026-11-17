@@ -1,4 +1,4 @@
-﻿import { cache } from "react";
+import { cache } from "react";
 import { cookies } from "next/headers";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
@@ -15,6 +15,7 @@ export interface AuthenticatedShopContext {
   businessId: string | null;
   businessName: string | null;
   role: UserRole;
+  employeeId: string | null;
 }
 
 export const getAuthenticatedShopContext = cache(
@@ -28,11 +29,11 @@ export const getAuthenticatedShopContext = cache(
 
     const supabase = await createSupabaseServerClient();
     const {
-      data: { session },
-    } = await supabase.auth.getSession();
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser();
 
-    const user = session?.user;
-    if (!user) {
+    if (authError || !user) {
       return null;
     }
 
@@ -75,6 +76,7 @@ export const getAuthenticatedShopContext = cache(
         businessId: null,
         businessName: null,
         role: "OWNER",
+        employeeId: null,
       };
     }
 
@@ -85,6 +87,28 @@ export const getAuthenticatedShopContext = cache(
       ? membership.roles[0]
       : membership.roles;
 
+    let employeeId: string | null = null;
+    if (membership.business_id) {
+      const { data: employeeByProfile } = await admin
+        .from("employees")
+        .select("id")
+        .eq("business_id", membership.business_id)
+        .eq("profile_id", user.id)
+        .maybeSingle();
+
+      if (employeeByProfile?.id) {
+        employeeId = employeeByProfile.id;
+      } else if (user.email) {
+        const { data: employeeByEmail } = await admin
+          .from("employees")
+          .select("id")
+          .eq("business_id", membership.business_id)
+          .ilike("email", user.email)
+          .maybeSingle();
+        employeeId = employeeByEmail?.id ?? null;
+      }
+    }
+
     return {
       userId: user.id,
       email: user.email ?? "",
@@ -92,6 +116,7 @@ export const getAuthenticatedShopContext = cache(
       businessId: membership.business_id,
       businessName: bizRecord?.name ?? "TechnoWorld",
       role: (roleRecord?.code as UserRole) ?? "EMPLOYEE",
+      employeeId,
     };
   }
 );

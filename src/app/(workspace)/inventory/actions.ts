@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { getAuthenticatedShopContext } from "@/lib/auth/session";
+import { assertAuthorizedRole } from "@/lib/auth/permissions";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
 export interface InventoryItemPayload {
@@ -20,6 +21,7 @@ export interface InventoryItemPayload {
 export async function createCategoryAction(name: string) {
   const ctx = await getAuthenticatedShopContext();
   if (!ctx || !ctx.businessId) redirect("/login");
+  assertAuthorizedRole(ctx.role, ["OWNER", "MANAGER"], "manage inventory");
 
   const cleanName = name.trim();
   if (!cleanName) throw new Error("Category name is required.");
@@ -37,6 +39,7 @@ export async function createCategoryAction(name: string) {
 export async function updateCategoryAction(id: string, newName: string) {
   const ctx = await getAuthenticatedShopContext();
   if (!ctx || !ctx.businessId) redirect("/login");
+  assertAuthorizedRole(ctx.role, ["OWNER", "MANAGER"], "manage inventory");
 
   const cleanName = newName.trim();
   if (!cleanName) throw new Error("Category name cannot be empty.");
@@ -55,6 +58,7 @@ export async function updateCategoryAction(id: string, newName: string) {
 export async function deleteCategoryAction(id: string) {
   const ctx = await getAuthenticatedShopContext();
   if (!ctx || !ctx.businessId) redirect("/login");
+  assertAuthorizedRole(ctx.role, ["OWNER", "MANAGER"], "manage inventory");
 
   const admin = createSupabaseAdminClient();
   const { error } = await admin
@@ -70,6 +74,7 @@ export async function deleteCategoryAction(id: string) {
 export async function createInventoryItemAction(payload: InventoryItemPayload) {
   const ctx = await getAuthenticatedShopContext();
   if (!ctx || !ctx.businessId) redirect("/login");
+  assertAuthorizedRole(ctx.role, ["OWNER", "MANAGER"], "manage inventory");
 
   const cleanName = String(payload.name || "").trim();
   if (!cleanName) throw new Error("Product name is required.");
@@ -96,6 +101,7 @@ export async function createInventoryItemAction(payload: InventoryItemPayload) {
 export async function updateInventoryItemAction(id: string, payload: InventoryItemPayload) {
   const ctx = await getAuthenticatedShopContext();
   if (!ctx || !ctx.businessId) redirect("/login");
+  assertAuthorizedRole(ctx.role, ["OWNER", "MANAGER"], "manage inventory");
 
   const admin = createSupabaseAdminClient();
   const { error } = await admin
@@ -122,6 +128,7 @@ export async function updateInventoryItemAction(id: string, payload: InventoryIt
 export async function adjustStockAction(id: string, delta: number) {
   const ctx = await getAuthenticatedShopContext();
   if (!ctx || !ctx.businessId) redirect("/login");
+  assertAuthorizedRole(ctx.role, ["OWNER", "MANAGER"], "manage inventory");
 
   const admin = createSupabaseAdminClient();
   const { data: current, error: fetchErr } = await admin
@@ -148,6 +155,7 @@ export async function adjustStockAction(id: string, delta: number) {
 export async function deleteInventoryItemAction(id: string) {
   const ctx = await getAuthenticatedShopContext();
   if (!ctx || !ctx.businessId) redirect("/login");
+  assertAuthorizedRole(ctx.role, ["OWNER", "MANAGER"], "manage inventory");
 
   const admin = createSupabaseAdminClient();
   const { error } = await admin

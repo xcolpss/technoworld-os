@@ -2,9 +2,6 @@
 
 import * as React from "react";
 import {
-  Calculator,
-  CheckCircle2,
-  CreditCard,
   Edit,
   Film,
   FileText,
@@ -21,6 +18,14 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input, Label } from "@/components/ui/input";
 import { formatPkr, pkrToPaisa } from "@/lib/format/currency";
+import {
+  CompactPrintButton,
+  ThermalReceiptSheet,
+  ThermalWidthSelector,
+  useThermalPaperWidth,
+  useThermalReceiptPrint,
+  type ThermalReceiptData,
+} from "@/components/pos/thermal-receipt";
 
 export interface PosCategoryRecord {
   id: string;
@@ -85,11 +90,18 @@ interface PosCounterProps {
   onUpdateComposing: (id: string, payload: { name: string; defaultPricePaisa: number }) => Promise<void>;
   onDeleteComposing: (id: string) => Promise<void>;
   onCompleteSale: (payload: {
+    clientTxId?: string;
     customerName: string;
     discountPaisa: number;
     paymentMethod: string;
     items: Array<{ productId?: string; name: string; category: string; quantity: number; retailPricePaisa: number; costPricePaisa: number }>;
-  }) => Promise<any>;
+  }) => Promise<{
+    success: boolean;
+    saleNumber: number;
+    saleId?: string;
+    receiptNumber?: string;
+    duplicatePrevented?: boolean;
+  }>;
 }
 
 export function PosCounter({
@@ -129,6 +141,31 @@ export function PosCounter({
     paymentMethod: string;
     date: string;
   } | null>(null);
+  const [paperWidth, setPaperWidth] = useThermalPaperWidth();
+
+  const thermalReceiptData: ThermalReceiptData | null = React.useMemo(() => {
+    if (!completedSale) return null;
+    return {
+      invoiceRef: completedSale.invoiceRef,
+      dateLabel: completedSale.date,
+      customerName: completedSale.customerName,
+      items: completedSale.items.map((item) => ({
+        name: item.name,
+        quantity: item.quantity,
+        unitPricePaisa: item.retailPricePaisa,
+        lineTotalPaisa: item.retailPricePaisa * item.quantity,
+      })),
+      subtotalPaisa: completedSale.subtotalPaisa,
+      discountPaisa: completedSale.discountPaisa,
+      grandTotalPaisa: completedSale.grandTotalPaisa,
+      paymentMethod: completedSale.paymentMethod,
+    };
+  }, [completedSale]);
+
+  const { triggerPrint } = useThermalReceiptPrint(
+    thermalReceiptData,
+    paperWidth
+  );
 
   // Print Calculator States
   const [showPaperModal, setShowPaperModal] = React.useState(false);
@@ -414,7 +451,12 @@ export function PosCounter({
   const discountAmountPaisa = Math.max(0, pkrToPaisa(discountPkr));
   const grandTotalPaisa = Math.max(0, subtotalPaisa - discountAmountPaisa);
 
+  const submittingRef = React.useRef(false);
+
   function handleCheckout() {
+    if (submittingRef.current || isPending) {
+      return;
+    }
     if (cart.length === 0) {
       setFeedback({ type: "err", text: "Cart is empty. Add products or services to checkout." });
       return;
@@ -423,14 +465,20 @@ export function PosCounter({
     const currentCartSnapshot = [...cart];
     const currentCustomerName = customerName.trim() || "WALK-IN CUSTOMER";
     const currentSubtotal = subtotalPaisa;
-    const currentDiscount = discountAmountPaisa;
-    const currentGrandTotal = grandTotalPaisa;
+    const currentDiscount = Math.min(subtotalPaisa, discountAmountPaisa);
+    const currentGrandTotal = Math.max(0, currentSubtotal - currentDiscount);
     const currentPaymentMethod = paymentMethod;
+    const txId =
+      typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+        ? crypto.randomUUID()
+        : undefined;
 
+    submittingRef.current = true;
     setFeedback(null);
     startTransition(async () => {
       try {
         const res = await onCompleteSale({
+          clientTxId: txId,
           customerName: currentCustomerName,
           discountPaisa: currentDiscount,
           paymentMethod: currentPaymentMethod,
@@ -445,7 +493,7 @@ export function PosCounter({
         });
 
         const saleNum = res?.saleNumber || Math.floor(1000 + Math.random() * 9000);
-        const invoiceRef = `#TW-${7000000 + saleNum}`;
+        const invoiceRef = res?.receiptNumber || `#TW-${7000000 + saleNum}`;
 
         // Open Receipt Modal matching the exact attached thermal receipt style
         setCompletedSale({
@@ -474,6 +522,8 @@ export function PosCounter({
         setFeedback({ type: "ok", text: "Sale completed successfully! Ready for printing." });
       } catch (err) {
         setFeedback({ type: "err", text: err instanceof Error ? err.message : "Checkout failed." });
+      } finally {
+        submittingRef.current = false;
       }
     });
   }
@@ -483,7 +533,7 @@ export function PosCounter({
       {/* LEFT 2 COLS: Clean Distinct Tabs */}
       <div className="lg:col-span-2 space-y-4">
         {/* POS Module Tabs */}
-        <div className="flex rounded-2xl border border-border bg-surface p-1.5 shadow-xs">
+        <div className="glass-panel grid grid-cols-2 sm:flex rounded-2xl border p-1.5 gap-1 sm:gap-1 shadow-xs">
           {(
             [
               { id: "MOVIES", label: "Movies & Media", icon: Film },
@@ -498,17 +548,21 @@ export function PosCounter({
                 key={t.id}
                 type="button"
                 onClick={() => setActiveTab(t.id)}
-                className={`flex-1 flex items-center justify-center gap-1.5 rounded-xl py-2 text-xs font-extrabold transition ${activeTab === t.id ? "bg-brand text-white shadow-xs" : "text-muted hover:text-ink"}`}
+                className={`flex-1 flex items-center justify-center gap-1.5 rounded-xl py-2.5 px-2 text-xs font-extrabold transition-all duration-200 cursor-pointer ${
+                  activeTab === t.id
+                    ? "bg-gradient-to-r from-[#FF7B1C] to-[#FF6A00] text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.28),0_4px_12px_-2px_rgba(255,106,0,0.35)]"
+                    : "text-[var(--foreground-secondary)] hover:text-[var(--foreground)] hover:bg-[var(--warm)]"
+                }`}
               >
-                <Icon className="h-3.5 w-3.5" />
-                {t.label}
+                <Icon className="h-3.5 w-3.5 shrink-0" />
+                <span className="truncate">{t.label}</span>
               </button>
             );
           })}
         </div>
 
         {feedback && (
-          <div className={`rounded-2xl px-4 py-3 text-xs font-semibold ${feedback.type === "ok" ? "bg-success-soft text-success border border-success/30" : "bg-danger-soft text-danger border border-danger/30"}`}>
+          <div className={`rounded-2xl px-4 py-3 text-xs font-semibold backdrop-blur-md ${feedback.type === "ok" ? "bg-[var(--success-soft)] text-[var(--success)] border border-[var(--success)]/30" : "bg-[var(--danger-soft)] text-[var(--danger)] border border-[var(--danger)]/30"}`}>
             {feedback.text}
           </div>
         )}
@@ -516,11 +570,11 @@ export function PosCounter({
         {/* TAB 1: MOVIES & MEDIA */}
         {activeTab === "MOVIES" && (
           <Card>
-            <CardContent className="p-6 space-y-4">
-              <div className="flex items-center justify-between border-b border-border pb-3">
-                <h3 className="font-display text-sm font-extrabold text-ink">Movies, TV Shows &amp; Media Copies</h3>
-                <Button type="button" size="sm"  onClick={() => setShowMediaModal(true)}>
-                  <FolderCog className="h-4 w-4 mr-1" /> Manage Categories ({mediaCategories.length})
+            <CardContent className="p-4 sm:p-6 space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--border)] pb-3">
+                <h3 className="font-display text-sm font-extrabold text-[var(--foreground)]">Movies, TV Shows &amp; Media Copies</h3>
+                <Button type="button" size="sm" variant="secondary" onClick={() => setShowMediaModal(true)}>
+                  <FolderCog className="h-4 w-4" /> Manage Categories ({mediaCategories.length})
                 </Button>
               </div>
 
@@ -533,7 +587,7 @@ export function PosCounter({
                 >
                   {mediaCategories.map((m) => (
                     <option key={m.id} value={m.id}>
-                      {m.name} ({m.type}) â€” {formatPkr(m.defaultPricePaisa)}
+                      {m.name} ({m.type}) — {formatPkr(m.defaultPricePaisa)}
                     </option>
                   ))}
                 </select>
@@ -550,8 +604,8 @@ export function PosCounter({
                 />
               </div>
 
-              <div className="rounded-2xl border border-brand/40 bg-brand-soft/10 p-4 space-y-2">
-                <div className="flex items-center justify-between text-xs font-bold text-brand-dark">
+              <div className="rounded-2xl border border-brand/40 bg-brand-soft/10 p-3.5 sm:p-4 space-y-2">
+                <div className="flex flex-wrap items-center justify-between gap-1 text-xs font-bold text-brand-dark">
                   <span>Live Calculator Breakdown:</span>
                   <span className="font-mono">{currentMediaCat?.name || "Media"}</span>
                 </div>
@@ -572,7 +626,7 @@ export function PosCounter({
               </div>
 
               <Button type="button" className="w-full" onClick={addMediaJob}>
-                Add Media to Bill â€¢ {formatPkr(liveTotalMediaPaisa)}
+                Add Media to Bill • {formatPkr(liveTotalMediaPaisa)}
               </Button>
             </CardContent>
           </Card>
@@ -581,11 +635,11 @@ export function PosCounter({
         {/* TAB 2: PRINTS & PAPERS */}
         {activeTab === "PRINTS" && (
           <Card>
-            <CardContent className="p-6 space-y-4">
-              <div className="flex items-center justify-between border-b border-border pb-3">
-                <h3 className="font-display text-sm font-extrabold text-ink">Prints &amp; Papers Calculator</h3>
-                <Button type="button" size="sm"  onClick={() => setShowPaperModal(true)}>
-                  <FolderCog className="h-4 w-4 mr-1" /> Manage Paper Types ({printPapers.length})
+            <CardContent className="p-4 sm:p-6 space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--border)] pb-3">
+                <h3 className="font-display text-sm font-extrabold text-[var(--foreground)]">Prints &amp; Papers Calculator</h3>
+                <Button type="button" size="sm" variant="secondary" onClick={() => setShowPaperModal(true)}>
+                  <FolderCog className="h-4 w-4" /> Manage Paper Types ({printPapers.length})
                 </Button>
               </div>
 
@@ -606,18 +660,18 @@ export function PosCounter({
 
               <div>
                 <Label className="text-xs font-bold text-ink">2. Print Mode</Label>
-                <div className="grid grid-cols-2 gap-2 mt-1.5">
+                <div className="grid grid-cols-1 min-[400px]:grid-cols-2 gap-2 mt-1.5">
                   <button
                     type="button"
                     onClick={() => setPrintMode("BW")}
-                    className={`rounded-xl py-2.5 text-xs font-extrabold transition ${printMode === "BW" ? "bg-brand text-white shadow-xs" : "border border-border bg-warm text-muted hover:text-ink"}`}
+                    className={`rounded-xl py-2.5 px-2 text-xs font-extrabold transition ${printMode === "BW" ? "bg-brand text-white shadow-xs" : "border border-border bg-warm text-muted hover:text-ink"}`}
                   >
                     Black &amp; White ({formatPkr(currentPaper?.bwPricePaisa || 1000)}/pg)
                   </button>
                   <button
                     type="button"
                     onClick={() => setPrintMode("COLOR")}
-                    className={`rounded-xl py-2.5 text-xs font-extrabold transition ${printMode === "COLOR" ? "bg-brand text-white shadow-xs" : "border border-border bg-warm text-muted hover:text-ink"}`}
+                    className={`rounded-xl py-2.5 px-2 text-xs font-extrabold transition ${printMode === "COLOR" ? "bg-brand text-white shadow-xs" : "border border-border bg-warm text-muted hover:text-ink"}`}
                   >
                     Colored ({formatPkr(currentPaper?.colorPricePaisa || 3000)}/pg)
                   </button>
@@ -626,18 +680,18 @@ export function PosCounter({
 
               <div>
                 <Label className="text-xs font-bold text-ink">3. Side Configuration</Label>
-                <div className="grid grid-cols-2 gap-2 mt-1.5">
+                <div className="grid grid-cols-1 min-[400px]:grid-cols-2 gap-2 mt-1.5">
                   <button
                     type="button"
                     onClick={() => setPrintSideMode("SINGLE")}
-                    className={`rounded-xl py-2.5 text-xs font-extrabold transition ${printSideMode === "SINGLE" ? "bg-brand text-white shadow-xs" : "border border-border bg-warm text-muted hover:text-ink"}`}
+                    className={`rounded-xl py-2.5 px-2 text-xs font-extrabold transition ${printSideMode === "SINGLE" ? "bg-brand text-white shadow-xs" : "border border-border bg-warm text-muted hover:text-ink"}`}
                   >
                     Single Sided (1x)
                   </button>
                   <button
                     type="button"
                     onClick={() => setPrintSideMode("DOUBLE")}
-                    className={`rounded-xl py-2.5 text-xs font-extrabold transition ${printSideMode === "DOUBLE" ? "bg-brand text-white shadow-xs" : "border border-border bg-warm text-muted hover:text-ink"}`}
+                    className={`rounded-xl py-2.5 px-2 text-xs font-extrabold transition ${printSideMode === "DOUBLE" ? "bg-brand text-white shadow-xs" : "border border-border bg-warm text-muted hover:text-ink"}`}
                   >
                     Double Sided (1.5x)
                   </button>
@@ -646,18 +700,18 @@ export function PosCounter({
 
               <div>
                 <Label className="text-xs font-bold text-ink">4. Quantity Type</Label>
-                <div className="grid grid-cols-2 gap-2 mt-1.5">
+                <div className="grid grid-cols-1 min-[400px]:grid-cols-2 gap-2 mt-1.5">
                   <button
                     type="button"
                     onClick={() => setPrintCountMode("SINGLE")}
-                    className={`rounded-xl py-2.5 text-xs font-extrabold transition ${printCountMode === "SINGLE" ? "bg-brand text-white shadow-xs" : "border border-border bg-warm text-muted hover:text-ink"}`}
+                    className={`rounded-xl py-2.5 px-2 text-xs font-extrabold transition ${printCountMode === "SINGLE" ? "bg-brand text-white shadow-xs" : "border border-border bg-warm text-muted hover:text-ink"}`}
                   >
                     Single Print (1 Page)
                   </button>
                   <button
                     type="button"
                     onClick={() => setPrintCountMode("MULTIPLE")}
-                    className={`rounded-xl py-2.5 text-xs font-extrabold transition ${printCountMode === "MULTIPLE" ? "bg-brand text-white shadow-xs" : "border border-border bg-warm text-muted hover:text-ink"}`}
+                    className={`rounded-xl py-2.5 px-2 text-xs font-extrabold transition ${printCountMode === "MULTIPLE" ? "bg-brand text-white shadow-xs" : "border border-border bg-warm text-muted hover:text-ink"}`}
                   >
                     Multiple Prints / Copies
                   </button>
@@ -678,7 +732,7 @@ export function PosCounter({
               )}
 
               <div>
-                <Label className="text-xs">Custom Price Override per Print (Rs.) â€” Optional</Label>
+                <Label className="text-xs">Custom Price Override per Print (Rs.) — Optional</Label>
                 <Input
                   type="number"
                   min="0"
@@ -689,10 +743,10 @@ export function PosCounter({
                 />
               </div>
 
-              <div className="rounded-2xl border border-brand/40 bg-brand-soft/10 p-4 space-y-2">
-                <div className="flex items-center justify-between text-xs font-bold text-brand-dark">
+              <div className="rounded-2xl border border-brand/40 bg-brand-soft/10 p-3.5 sm:p-4 space-y-2">
+                <div className="flex flex-wrap items-center justify-between gap-1 text-xs font-bold text-brand-dark">
                   <span>Live Calculator Breakdown:</span>
-                  <span className="font-mono">{currentPaper?.name || "Paper"} â€¢ {printMode} â€¢ {printSideMode}</span>
+                  <span className="font-mono">{currentPaper?.name || "Paper"} • {printMode} • {printSideMode}</span>
                 </div>
                 <div className="grid grid-cols-3 gap-2 text-center text-xs font-mono pt-1 border-t border-brand/20">
                   <div>
@@ -711,7 +765,7 @@ export function PosCounter({
               </div>
 
               <Button type="button" className="w-full" onClick={addPrintJob}>
-                Add Print Job to Bill â€¢ {formatPkr(liveTotalPrintPaisa)}
+                Add Print Job to Bill • {formatPkr(liveTotalPrintPaisa)}
               </Button>
             </CardContent>
           </Card>
@@ -745,9 +799,9 @@ export function PosCounter({
               ))}
             </div>
 
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 min-[380px]:grid-cols-2 sm:grid-cols-3 gap-3">
               {filteredProducts.length === 0 ? (
-                <div className="col-span-full py-12 text-center text-xs text-muted bg-surface rounded-2xl border border-border">
+                <div className="col-span-full py-12 px-4 text-center text-xs text-muted bg-surface rounded-2xl border border-border">
                   No products found in inventory. Add physical items in the Inventory tab to see them here.
                 </div>
               ) : (
@@ -760,14 +814,14 @@ export function PosCounter({
                       type="button"
                       onClick={() => addProductToCart(p)}
                       disabled={isOut}
-                      className={`flex flex-col justify-between rounded-2xl border border-border bg-surface p-4 text-left transition hover:border-brand/50 hover:shadow-sm ${isOut ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
+                      className={`card-3d-tile glass-card flex flex-col justify-between rounded-2xl p-3.5 sm:p-4 text-left ${isOut ? "opacity-50 cursor-not-allowed" : "cursor-pointer hover:border-[var(--primary)]/50"}`}
                     >
                       <div className="space-y-1">
                         <span className="font-mono text-[10px] text-muted">{p.category}</span>
                         <h4 className="font-display text-xs font-extrabold text-ink line-clamp-2">{p.name}</h4>
                       </div>
 
-                      <div className="mt-3 pt-2 border-t border-border flex items-center justify-between">
+                      <div className="mt-3 pt-2 border-t border-border flex flex-wrap items-center justify-between gap-1">
                         <span className="font-mono font-extrabold text-brand-dark text-xs">{formatPkr(p.retailPricePaisa)}</span>
                         <Badge variant={isOut ? "danger" : "success"} className="text-[10px]">
                           {p.stockQuantity} {p.unit}
@@ -784,11 +838,11 @@ export function PosCounter({
         {/* TAB 4: COMPOSING SERVICES */}
         {activeTab === "COMPOSING" && (
           <Card>
-            <CardContent className="p-6 space-y-4">
-              <div className="flex items-center justify-between border-b border-border pb-3">
-                <h3 className="font-display text-sm font-extrabold text-ink">Document Composing &amp; Online Services</h3>
-                <Button type="button" size="sm"  onClick={() => setShowComposingModal(true)}>
-                  <FolderCog className="h-4 w-4 mr-1" /> Manage Services ({composingServices.length})
+            <CardContent className="p-4 sm:p-6 space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--border)] pb-3">
+                <h3 className="font-display text-sm font-extrabold text-[var(--foreground)]">Document Composing &amp; Online Services</h3>
+                <Button type="button" size="sm" variant="secondary" onClick={() => setShowComposingModal(true)}>
+                  <FolderCog className="h-4 w-4" /> Manage Services ({composingServices.length})
                 </Button>
               </div>
 
@@ -801,7 +855,7 @@ export function PosCounter({
                 >
                   {composingServices.map((s) => (
                     <option key={s.id} value={s.id}>
-                      {s.name} â€” {formatPkr(s.defaultPricePaisa)}
+                      {s.name} — {formatPkr(s.defaultPricePaisa)}
                     </option>
                   ))}
                 </select>
@@ -819,7 +873,7 @@ export function PosCounter({
               </div>
 
               <div>
-                <Label className="text-xs font-bold text-ink">Custom Price Override (Rs.) â€” Optional</Label>
+                <Label className="text-xs font-bold text-ink">Custom Price Override (Rs.) — Optional</Label>
                 <Input
                   type="number"
                   min="0"
@@ -830,8 +884,8 @@ export function PosCounter({
                 />
               </div>
 
-              <div className="rounded-2xl border border-brand/40 bg-brand-soft/10 p-4 space-y-2">
-                <div className="flex items-center justify-between text-xs font-bold text-brand-dark">
+              <div className="rounded-2xl border border-brand/40 bg-brand-soft/10 p-3.5 sm:p-4 space-y-2">
+                <div className="flex flex-wrap items-center justify-between gap-1 text-xs font-bold text-brand-dark">
                   <span>Live Calculator Breakdown:</span>
                   <span className="font-mono">{currentComposing?.name || "Service"}</span>
                 </div>
@@ -852,7 +906,7 @@ export function PosCounter({
               </div>
 
               <Button type="button" className="w-full" onClick={addComposingJob}>
-                Add Composing Job to Bill â€¢ {formatPkr(liveTotalComposingPaisa)}
+                Add Composing Job to Bill • {formatPkr(liveTotalComposingPaisa)}
               </Button>
             </CardContent>
           </Card>
@@ -861,7 +915,7 @@ export function PosCounter({
 
       {/* RIGHT COL: Cart / Bill & Checkout */}
       <div className="space-y-4">
-        <Card className="sticky top-6">
+        <Card className="lg:sticky lg:top-6">
           <CardContent className="p-4 space-y-4">
             <div className="flex items-center justify-between border-b border-border pb-3">
               <div className="flex items-center gap-2">
@@ -896,11 +950,11 @@ export function PosCounter({
                     </div>
 
                     <div className="flex items-center gap-1.5">
-                      <Button type="button" size="sm"  className="h-6 w-6 p-0 text-xs" onClick={() => updateQuantity(item.id, -1)}>
+                      <Button type="button" size="sm" variant="outline" className="h-7 w-7 p-0 text-xs" onClick={() => updateQuantity(item.id, -1)}>
                         <Minus className="h-3 w-3" />
                       </Button>
                       <span className="font-mono font-bold text-ink w-5 text-center">{item.quantity}</span>
-                      <Button type="button" size="sm"  className="h-6 w-6 p-0 text-xs" onClick={() => updateQuantity(item.id, 1)}>
+                      <Button type="button" size="sm" variant="outline" className="h-7 w-7 p-0 text-xs" onClick={() => updateQuantity(item.id, 1)}>
                         <Plus className="h-3 w-3" />
                       </Button>
                     </div>
@@ -956,122 +1010,50 @@ export function PosCounter({
               onClick={handleCheckout}
               disabled={isPending || cart.length === 0}
             >
-              {isPending ? "Processing Sale..." : `Complete Sale â€¢ ${formatPkr(grandTotalPaisa)}`}
+              {isPending ? "Processing Sale..." : `Complete Sale • ${formatPkr(grandTotalPaisa)}`}
             </Button>
           </CardContent>
         </Card>
       </div>
 
-      {/* MODAL: THERMAL RECEIPT PREVIEW (Matches attached TechnoWorld receipt image) */}
-      {completedSale && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 print:bg-white print:p-0 print:absolute print:inset-0">
-          <div className="w-full max-w-sm rounded-xl border border-border bg-surface p-5 shadow-2xl space-y-3 font-mono text-xs print:shadow-none print:border-none print:w-full print:max-w-none print:p-1 print:text-black">
-            
-            {/* Header */}
-            <div className="text-center space-y-0.5 border-b border-dashed border-border pb-3">
-              <div className="inline-block bg-black text-white font-black px-2.5 py-1 text-xs tracking-widest rounded mb-1">
-                TW
-              </div>
-              <h2 className="font-display text-sm font-extrabold tracking-wider uppercase text-ink print:text-black">TECHNO WORLD</h2>
-              <p className="text-[10px] uppercase font-semibold text-muted print:text-gray-700">COMPUTERS â€¢ PRINTING â€¢ ACCESSORIES</p>
-              <p className="text-[9px] text-muted print:text-gray-600">Rawalpindi â€¢ Sales &amp; Digital Services</p>
-            </div>
+      {/* MODAL: DYNAMIC THERMAL RECEIPT PREVIEW */}
+      {completedSale && thermalReceiptData && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/65 backdrop-blur-sm tw-backdrop-in p-3 sm:p-4">
+          <div className="glass-modal w-full max-w-sm max-h-[92vh] overflow-y-auto rounded-2xl p-4 space-y-3">
+            <ThermalWidthSelector
+              value={paperWidth}
+              onChange={setPaperWidth}
+              itemCount={thermalReceiptData.items.length}
+              hasDiscount={thermalReceiptData.discountPaisa > 0}
+            />
 
-            {/* Meta Info */}
-            <div className="space-y-1 border-b border-dashed border-border pb-3 text-[11px]">
-              <div className="flex justify-between">
-                <span className="text-muted print:text-gray-600">INVOICE:</span>
-                <span className="font-bold text-ink print:text-black">{completedSale.invoiceRef}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-muted print:text-gray-600">DATE:</span>
-                <span className="text-ink print:text-black">{completedSale.date}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-muted print:text-gray-600">CUSTOMER:</span>
-                <span className="font-bold uppercase text-ink print:text-black">{completedSale.customerName}</span>
-              </div>
-            </div>
+            <ThermalReceiptSheet
+              data={thermalReceiptData}
+              paperWidth={paperWidth}
+            />
 
-            {/* Description Header */}
-            <div className="flex justify-between font-bold border-b border-border pb-1 text-[11px] uppercase">
-              <span>Description</span>
-              <span>Total</span>
-            </div>
-
-            {/* Receipt Items */}
-            <div className="space-y-2 max-h-52 overflow-y-auto text-[11px] border-b border-dashed border-border pb-3">
-              {completedSale.items.map((item, idx) => {
-                const lineTotal = item.retailPricePaisa * item.quantity;
-                return (
-                  <div key={idx} className="space-y-0.5 border-b border-dotted border-border/60 pb-1.5 last:border-none">
-                    <p className="font-bold text-ink print:text-black">{item.name}</p>
-                    <div className="flex justify-between text-[10px] text-muted print:text-gray-600">
-                      <span>Qty: {item.quantity} â€¢ {formatPkr(item.retailPricePaisa)}</span>
-                      <span className="font-bold font-mono text-ink print:text-black">{formatPkr(lineTotal)}</span>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-
-            {/* Totals */}
-            <div className="space-y-1 text-xs border-b border-dashed border-border pb-3">
-              <div className="flex justify-between text-muted print:text-gray-600">
-                <span>Subtotal</span>
-                <span className="font-mono text-ink print:text-black">{formatPkr(completedSale.subtotalPaisa)}</span>
-              </div>
-              {completedSale.discountPaisa > 0 && (
-                <div className="flex justify-between text-danger">
-                  <span>Discount</span>
-                  <span className="font-mono">-{formatPkr(completedSale.discountPaisa)}</span>
-                </div>
-              )}
-              <div className="flex justify-between text-sm font-extrabold text-ink print:text-black pt-1">
-                <span>GRAND TOTAL</span>
-                <span className="font-mono text-brand-dark print:text-black">{formatPkr(completedSale.grandTotalPaisa)}</span>
-              </div>
-              <div className="flex justify-between text-[11px] text-muted print:text-gray-600 pt-1">
-                <span>PAYMENT METHOD</span>
-                <span className="font-bold font-mono uppercase text-ink print:text-black">{completedSale.paymentMethod}_TRANSFER</span>
-              </div>
-            </div>
-
-            {/* Footer */}
-            <div className="text-center space-y-1 pt-1 text-[10px] text-muted print:text-gray-600">
-              <p className="font-bold uppercase tracking-wide text-ink print:text-black">THANK YOU FOR VISITING TECHNO WORLD!</p>
-              <p className="text-[9px]">Goods once sold are exchangeable within 3 days with receipt</p>
-            </div>
-
-            {/* Actions (Hidden when printing via browser print) */}
-            <div className="flex items-center gap-2 pt-2 print:hidden">
+            <div className="flex flex-wrap items-center gap-2 pt-1">
+              <CompactPrintButton onClick={triggerPrint} label="Print Receipt" />
               <Button
                 type="button"
-                className="flex-1"
-                onClick={() => window.print()}
-              >
-                <Printer className="h-4 w-4 mr-1.5" /> Print Receipt
-              </Button>
-              <Button
-                type="button"
-                
+                variant="outline"
+                className="flex-1 sm:flex-none"
                 onClick={() => setCompletedSale(null)}
               >
                 Close / New Sale
               </Button>
             </div>
-
           </div>
         </div>
       )}
 
       {/* MODAL: Manage Paper Types */}
       {showPaperModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="w-full max-w-md rounded-2xl border border-border bg-surface p-6 shadow-xl space-y-4">
-            <div className="flex items-center justify-between border-b border-border pb-3">
-              <h3 className="font-display text-base font-extrabold text-ink">Manage Paper Types &amp; Rates</h3>
-              <Button type="button" size="sm" variant="ghost" onClick={() => setShowPaperModal(false)}>âœ•</Button>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm tw-backdrop-in p-3 sm:p-4">
+          <div className="glass-modal w-full max-w-md max-h-[90vh] overflow-y-auto rounded-2xl p-4 sm:p-6 space-y-4">
+            <div className="flex items-center justify-between border-b border-[var(--border)] pb-3">
+              <h3 className="font-display text-base font-extrabold text-[var(--foreground)]">Manage Paper Types &amp; Rates</h3>
+              <Button type="button" size="sm" variant="ghost" onClick={() => setShowPaperModal(false)}>✕</Button>
             </div>
 
             <form onSubmit={handlePaperSave} className="space-y-3">
@@ -1086,7 +1068,7 @@ export function PosCounter({
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 min-[400px]:grid-cols-2 gap-3">
                 <div>
                   <Label className="text-xs">B&amp;W Price (Rs.)</Label>
                   <Input
@@ -1123,12 +1105,12 @@ export function PosCounter({
 
             <div className="space-y-2 max-h-48 overflow-y-auto pt-2 border-t border-border">
               {printPapers.map((p) => (
-                <div key={p.id} className="flex items-center justify-between rounded-xl border border-border bg-warm px-3 py-2 text-xs">
-                  <div>
-                    <p className="font-bold text-ink">{p.name}</p>
+                <div key={p.id} className="flex items-center justify-between gap-2 rounded-xl border border-border bg-warm px-3 py-2 text-xs">
+                  <div className="min-w-0">
+                    <p className="font-bold text-ink truncate">{p.name}</p>
                     <p className="font-mono text-[10px] text-muted">B&amp;W: {formatPkr(p.bwPricePaisa)} | Color: {formatPkr(p.colorPricePaisa)}</p>
                   </div>
-                  <div className="flex items-center gap-1">
+                  <div className="flex items-center gap-1 shrink-0">
                     <Button type="button" size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={() => { setEditingPaper(p); setPaperName(p.name); setPaperBwPkr(Math.round(p.bwPricePaisa / 100).toString()); setPaperColorPkr(Math.round(p.colorPricePaisa / 100).toString()); }}>
                       <Edit className="h-3.5 w-3.5 text-muted" />
                     </Button>
@@ -1149,15 +1131,15 @@ export function PosCounter({
 
       {/* MODAL: Manage Media Categories */}
       {showMediaModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="w-full max-w-md rounded-2xl border border-border bg-surface p-6 shadow-xl space-y-4">
-            <div className="flex items-center justify-between border-b border-border pb-3">
-              <h3 className="font-display text-base font-extrabold text-ink">Manage Media Categories &amp; Prices</h3>
-              <Button type="button" size="sm" variant="ghost" onClick={() => setShowMediaModal(false)}>âœ•</Button>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm tw-backdrop-in p-3 sm:p-4">
+          <div className="glass-modal w-full max-w-md max-h-[90vh] overflow-y-auto rounded-2xl p-4 sm:p-6 space-y-4">
+            <div className="flex items-center justify-between border-b border-[var(--border)] pb-3">
+              <h3 className="font-display text-base font-extrabold text-[var(--foreground)]">Manage Media Categories &amp; Prices</h3>
+              <Button type="button" size="sm" variant="ghost" onClick={() => setShowMediaModal(false)}>✕</Button>
             </div>
 
             <form onSubmit={handleMediaCatSave} className="space-y-3">
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 min-[400px]:grid-cols-2 gap-3">
                 <div>
                   <Label className="text-xs">Type</Label>
                   <select
@@ -1208,12 +1190,12 @@ export function PosCounter({
 
             <div className="space-y-2 max-h-48 overflow-y-auto pt-2 border-t border-border">
               {mediaCategories.map((m) => (
-                <div key={m.id} className="flex items-center justify-between rounded-xl border border-border bg-warm px-3 py-2 text-xs">
-                  <div>
-                    <p className="font-bold text-ink">{m.name} <span className="font-mono text-[10px] text-muted">({m.type})</span></p>
+                <div key={m.id} className="flex items-center justify-between gap-2 rounded-xl border border-border bg-warm px-3 py-2 text-xs">
+                  <div className="min-w-0">
+                    <p className="font-bold text-ink truncate">{m.name} <span className="font-mono text-[10px] text-muted">({m.type})</span></p>
                     <p className="font-mono text-[10px] text-brand-dark font-bold">Price: {formatPkr(m.defaultPricePaisa)}</p>
                   </div>
-                  <div className="flex items-center gap-1">
+                  <div className="flex items-center gap-1 shrink-0">
                     <Button type="button" size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={() => { setEditingMediaCat(m); setMediaTypeN(m.type); setMediaCatName(m.name); setMediaDefaultPkr(Math.round(m.defaultPricePaisa / 100).toString()); }}>
                       <Edit className="h-3.5 w-3.5 text-muted" />
                     </Button>
@@ -1234,11 +1216,11 @@ export function PosCounter({
 
       {/* MODAL: Manage Composing Services */}
       {showComposingModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="w-full max-w-md rounded-2xl border border-border bg-surface p-6 shadow-xl space-y-4">
-            <div className="flex items-center justify-between border-b border-border pb-3">
-              <h3 className="font-display text-base font-extrabold text-ink">Manage Composing Services &amp; Prices</h3>
-              <Button type="button" size="sm" variant="ghost" onClick={() => setShowComposingModal(false)}>âœ•</Button>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm tw-backdrop-in p-3 sm:p-4">
+          <div className="glass-modal w-full max-w-md max-h-[90vh] overflow-y-auto rounded-2xl p-4 sm:p-6 space-y-4">
+            <div className="flex items-center justify-between border-b border-[var(--border)] pb-3">
+              <h3 className="font-display text-base font-extrabold text-[var(--foreground)]">Manage Composing Services &amp; Prices</h3>
+              <Button type="button" size="sm" variant="ghost" onClick={() => setShowComposingModal(false)}>✕</Button>
             </div>
 
             <form onSubmit={handleComposingSave} className="space-y-3">

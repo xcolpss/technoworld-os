@@ -6,7 +6,10 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { AllocationStackedBar } from "@/components/ui/mini-charts";
 import { getAuthenticatedShopContext } from "@/lib/auth/session";
+import { hasRequiredRole } from "@/lib/auth/permissions";
+import { AccessRestricted } from "@/components/auth/access-restricted";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { formatPkr } from "@/lib/format/currency";
 import {
@@ -37,6 +40,15 @@ export default async function FinancePage({ searchParams }: FinancePageProps) {
 
   const ctx = await getAuthenticatedShopContext();
   if (!ctx || !ctx.businessId) redirect("/login");
+  if (!hasRequiredRole(ctx.role, ["OWNER"])) {
+    return (
+      <AccessRestricted
+        currentRole={ctx.role}
+        requiredRoles={["OWNER"]}
+        sectionName="Finance & Capital Accounts"
+      />
+    );
+  }
 
   const admin = createSupabaseAdminClient();
 
@@ -81,13 +93,13 @@ export default async function FinancePage({ searchParams }: FinancePageProps) {
   return (
     <div className="space-y-6 pb-12">
       <PageHeader
-        eyebrow="TechnoWorld OS â€¢ Financial &amp; Owner Accounting System"
-        title="Finance &amp; Owner Accounts"
+        eyebrow="TechnoWorld OS • Financial & Owner Accounting System"
+        title="Finance & Owner Accounts"
         description="Double-entry general ledger, multi-owner capital contributions, household drawings, and multi-wallet liquidity management."
       />
 
       {/* Navigation Tabs */}
-      <div className="flex flex-wrap gap-2 rounded-2xl border border-border bg-surface p-1.5 shadow-xs">
+      <div className="glass-panel flex flex-wrap gap-1.5 sm:gap-2 rounded-2xl border p-1.5">
         {[
           { id: "overview", label: "Financial Overview", icon: DollarSign },
           { id: "accounts", label: "Accounts & Wallets", icon: Wallet },
@@ -101,9 +113,13 @@ export default async function FinancePage({ searchParams }: FinancePageProps) {
             <Link
               key={t.id}
               href={`/finance?tab=${t.id}`}
-              className={`flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-extrabold transition ${isActive ? "bg-brand text-white shadow-xs" : "text-muted hover:text-ink hover:bg-warm"}`}
+              className={`flex flex-1 sm:flex-none items-center justify-center sm:justify-start gap-2 rounded-xl px-3 sm:px-4 py-2 text-xs font-extrabold whitespace-nowrap transition-all duration-200 ${
+                isActive
+                  ? "bg-gradient-to-r from-[#FF7B1C] to-[#FF6A00] text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.28),0_4px_12px_-2px_rgba(255,106,0,0.35)]"
+                  : "text-[var(--foreground-secondary)] hover:text-[var(--foreground)] hover:bg-[var(--warm)]"
+              }`}
             >
-              <Icon className="h-4 w-4" />
+              <Icon className="h-4 w-4 shrink-0" />
               {t.label}
             </Link>
           );
@@ -115,52 +131,75 @@ export default async function FinancePage({ searchParams }: FinancePageProps) {
         <div className="space-y-6">
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <Card className="border-brand/30 bg-brand-soft/10">
-              <CardContent className="p-5 space-y-1">
+              <CardContent className="p-4 sm:p-5 space-y-1">
                 <span className="text-xs font-bold text-muted">Total Available Liquidity</span>
-                <p className="font-mono text-2xl font-extrabold text-ink">{formatPkr(totalLiquidity)}</p>
+                <p className="font-mono text-xl sm:text-2xl font-extrabold text-ink">{formatPkr(totalLiquidity)}</p>
                 <p className="text-[10px] text-muted">Cash, Bank, &amp; Wallets combined</p>
               </CardContent>
             </Card>
 
             <Card className="border-border bg-surface">
-              <CardContent className="p-5 space-y-1">
+              <CardContent className="p-4 sm:p-5 space-y-1">
                 <span className="text-xs font-bold text-muted">Net Sales Revenue</span>
-                <p className="font-mono text-2xl font-extrabold text-brand-dark">{formatPkr(netSales)}</p>
+                <p className="font-mono text-xl sm:text-2xl font-extrabold text-brand-dark">{formatPkr(netSales)}</p>
                 <p className="text-[10px] text-muted">Excl. Rs. {formatPkr(totalDiscounts)} discounts</p>
               </CardContent>
             </Card>
 
             <Card className="border-success/30 bg-success-soft/10">
-              <CardContent className="p-5 space-y-1">
+              <CardContent className="p-4 sm:p-5 space-y-1">
                 <span className="text-xs font-bold text-success">Owner Capital Invested</span>
-                <p className="font-mono text-2xl font-extrabold text-success">{formatPkr(totalOwnerContributions)}</p>
+                <p className="font-mono text-xl sm:text-2xl font-extrabold text-success">{formatPkr(totalOwnerContributions)}</p>
                 <p className="text-[10px] text-muted">Subhan Shahid, Father, Brother</p>
               </CardContent>
             </Card>
 
             <Card className="border-danger/30 bg-danger-soft/10">
-              <CardContent className="p-5 space-y-1">
+              <CardContent className="p-4 sm:p-5 space-y-1">
                 <span className="text-xs font-bold text-danger">Household Withdrawals</span>
-                <p className="font-mono text-2xl font-extrabold text-danger">{formatPkr(totalHouseholdDrawings)}</p>
+                <p className="font-mono text-xl sm:text-2xl font-extrabold text-danger">{formatPkr(totalHouseholdDrawings)}</p>
                 <p className="text-[10px] text-muted">Shop drawings &amp; personal use</p>
               </CardContent>
             </Card>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <Card className="border-border bg-surface">
-              <CardContent className="p-6 space-y-4">
+            <Card>
+              <CardContent className="p-4 sm:p-6 space-y-4">
                 <h3 className="font-display text-base font-extrabold text-ink border-b border-border pb-3">Wallet &amp; Liquidity Breakdown</h3>
-                <div className="space-y-3 font-mono text-xs">
-                  <div className="flex justify-between p-3 rounded-xl bg-warm">
+                <AllocationStackedBar
+                  title="Liquidity Distribution"
+                  segments={[
+                    {
+                      label: "Cash Drawers",
+                      value: totalCashAccounts,
+                      formattedValue: formatPkr(totalCashAccounts),
+                      tone: "brand",
+                    },
+                    {
+                      label: "Bank Accounts",
+                      value: totalBankAccounts,
+                      formattedValue: formatPkr(totalBankAccounts),
+                      tone: "info",
+                    },
+                    {
+                      label: "Digital Wallets",
+                      value: totalDigitalAccounts,
+                      formattedValue: formatPkr(totalDigitalAccounts),
+                      tone: "success",
+                    },
+                  ]}
+                />
+                <div className="space-y-2.5 font-mono text-xs pt-1">
+                  <div className="flex flex-wrap items-center justify-between gap-1 p-3 rounded-xl bg-warm">
                     <span className="text-muted">Cash Drawers:</span>
                     <span className="font-bold text-ink">{formatPkr(totalCashAccounts)}</span>
                   </div>
-                  <div className="flex justify-between p-3 rounded-xl bg-warm">
+                  <div className="flex flex-wrap items-center justify-between gap-1 p-3 rounded-xl bg-warm">
                     <span className="text-muted">Bank Accounts:</span>
                     <span className="font-bold text-ink">{formatPkr(totalBankAccounts)}</span>
                   </div>
-                  <div className="flex justify-between p-3 rounded-xl bg-warm">
+                  <div className="flex flex-wrap items-center justify-between gap-1 p-3 rounded-xl bg-warm">
                     <span className="text-muted">Digital Wallets (Easypaisa/JazzCash):</span>
                     <span className="font-bold text-ink">{formatPkr(totalDigitalAccounts)}</span>
                   </div>
@@ -169,7 +208,7 @@ export default async function FinancePage({ searchParams }: FinancePageProps) {
             </Card>
 
             <Card className="border-border bg-surface">
-              <CardContent className="p-6 space-y-4">
+              <CardContent className="p-4 sm:p-6 space-y-4">
                 <h3 className="font-display text-base font-extrabold text-ink border-b border-border pb-3">Accounting Compliance</h3>
                 <div className="space-y-3 text-xs">
                   <div className="flex items-center gap-2.5 p-3 rounded-xl bg-success-soft/30 border border-success/30 text-success">
@@ -189,9 +228,30 @@ export default async function FinancePage({ searchParams }: FinancePageProps) {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <div className="lg:col-span-2 space-y-4">
             <Card className="border-border bg-surface">
-              <CardContent className="p-6 space-y-4">
+              <CardContent className="p-4 sm:p-6 space-y-4">
                 <h3 className="font-display text-base font-extrabold text-ink">Active Business Accounts &amp; Wallets</h3>
-                <div className="overflow-x-auto">
+
+                {/* Mobile Stacked Cards (<640px) */}
+                <div className="sm:hidden space-y-2.5">
+                  {accounts.map((acc, idx) => (
+                    <div key={idx} className="rounded-xl border border-border bg-warm/40 p-3 space-y-2 text-xs">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-bold text-ink text-sm break-words">{acc.account_name}</span>
+                        <Badge variant="success">Active</Badge>
+                      </div>
+                      <div className="flex items-center justify-between gap-2 pt-1 border-t border-border/60">
+                        <Badge>{acc.account_type}</Badge>
+                        <span className="font-mono font-bold text-brand-dark">{formatPkr(acc.opening_balance_paisa || 0)}</span>
+                      </div>
+                    </div>
+                  ))}
+                  {accounts.length === 0 && (
+                    <p className="p-6 text-center text-xs text-muted">No financial accounts registered yet. Use the form to add one.</p>
+                  )}
+                </div>
+
+                {/* Desktop & Tablet Table (>=640px) */}
+                <div className="hidden sm:block overflow-x-auto">
                   <table className="w-full text-left text-xs border-collapse">
                     <thead>
                       <tr className="border-b border-border bg-warm/60 text-muted">
@@ -222,7 +282,7 @@ export default async function FinancePage({ searchParams }: FinancePageProps) {
 
           <div>
             <Card className="border-border bg-surface">
-              <CardContent className="p-6 space-y-4">
+              <CardContent className="p-4 sm:p-6 space-y-4">
                 <h3 className="font-display text-sm font-extrabold text-ink flex items-center gap-2">
                   <PlusCircle className="h-4 w-4 text-brand" /> Add Financial Account
                 </h3>
@@ -261,9 +321,30 @@ export default async function FinancePage({ searchParams }: FinancePageProps) {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <div className="lg:col-span-2 space-y-4">
             <Card className="border-border bg-surface">
-              <CardContent className="p-6 space-y-4">
+              <CardContent className="p-4 sm:p-6 space-y-4">
                 <h3 className="font-display text-base font-extrabold text-ink">Owner Capital Contributions</h3>
-                <div className="overflow-x-auto">
+
+                {/* Mobile Stacked Cards (<640px) */}
+                <div className="sm:hidden space-y-2.5">
+                  {contributions.map((c, idx) => (
+                    <div key={idx} className="rounded-xl border border-border bg-warm/40 p-3 space-y-2 text-xs">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-bold text-ink text-sm">{c.owner_name}</span>
+                        <Badge variant="brand">{c.contribution_type}</Badge>
+                      </div>
+                      <div className="flex items-center justify-between gap-2 pt-1 border-t border-border/60">
+                        <span className="font-mono text-muted">{new Date(c.contribution_date).toLocaleDateString()}</span>
+                        <span className="font-mono font-bold text-success">{formatPkr(c.amount_paisa)}</span>
+                      </div>
+                    </div>
+                  ))}
+                  {contributions.length === 0 && (
+                    <p className="p-6 text-center text-xs text-muted">No owner contributions recorded yet.</p>
+                  )}
+                </div>
+
+                {/* Desktop & Tablet Table (>=640px) */}
+                <div className="hidden sm:block overflow-x-auto">
                   <table className="w-full text-left text-xs border-collapse">
                     <thead>
                       <tr className="border-b border-border bg-warm/60 text-muted">
@@ -294,7 +375,7 @@ export default async function FinancePage({ searchParams }: FinancePageProps) {
 
           <div>
             <Card className="border-border bg-surface">
-              <CardContent className="p-6 space-y-4">
+              <CardContent className="p-4 sm:p-6 space-y-4">
                 <h3 className="font-display text-sm font-extrabold text-ink flex items-center gap-2">
                   <PlusCircle className="h-4 w-4 text-brand" /> Record Contribution
                 </h3>
@@ -345,9 +426,31 @@ export default async function FinancePage({ searchParams }: FinancePageProps) {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <div className="lg:col-span-2 space-y-4">
             <Card className="border-border bg-surface">
-              <CardContent className="p-6 space-y-4">
+              <CardContent className="p-4 sm:p-6 space-y-4">
                 <h3 className="font-display text-base font-extrabold text-ink">Household Withdrawals &amp; Owner Drawings</h3>
-                <div className="overflow-x-auto">
+
+                {/* Mobile Stacked Cards (<640px) */}
+                <div className="sm:hidden space-y-2.5">
+                  {drawings.map((d, idx) => (
+                    <div key={idx} className="rounded-xl border border-border bg-warm/40 p-3 space-y-2 text-xs">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-bold text-ink text-sm">{d.owner_name}</span>
+                        <Badge variant="danger">{d.category}</Badge>
+                      </div>
+                      <p className="font-semibold text-ink">{d.purpose || "General"}</p>
+                      <div className="flex items-center justify-between gap-2 pt-1 border-t border-border/60">
+                        <span className="font-mono text-[10px] text-muted">{new Date(d.drawing_date).toLocaleDateString()}</span>
+                        <span className="font-mono font-bold text-danger">{formatPkr(d.amount_paisa)}</span>
+                      </div>
+                    </div>
+                  ))}
+                  {drawings.length === 0 && (
+                    <p className="p-6 text-center text-xs text-muted">No household withdrawals recorded yet.</p>
+                  )}
+                </div>
+
+                {/* Desktop & Tablet Table (>=640px) */}
+                <div className="hidden sm:block overflow-x-auto">
                   <table className="w-full text-left text-xs border-collapse">
                     <thead>
                       <tr className="border-b border-border bg-warm/60 text-muted">
@@ -381,7 +484,7 @@ export default async function FinancePage({ searchParams }: FinancePageProps) {
 
           <div>
             <Card className="border-border bg-surface">
-              <CardContent className="p-6 space-y-4">
+              <CardContent className="p-4 sm:p-6 space-y-4">
                 <h3 className="font-display text-sm font-extrabold text-ink flex items-center gap-2">
                   <PlusCircle className="h-4 w-4 text-brand" /> Record Withdrawal
                 </h3>
@@ -420,7 +523,7 @@ export default async function FinancePage({ searchParams }: FinancePageProps) {
                     <Label>Purpose / Details</Label>
                     <Input name="purpose" placeholder="e.g. Monthly electricity bill" className="mt-1 h-9" />
                   </div>
-                  <Button type="submit"  className="w-full mt-2 text-danger hover:bg-danger-soft">Record Withdrawal</Button>
+                  <Button type="submit" variant="danger" className="w-full mt-2">Record Withdrawal</Button>
                 </form>
               </CardContent>
             </Card>
@@ -433,9 +536,28 @@ export default async function FinancePage({ searchParams }: FinancePageProps) {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <div className="lg:col-span-2 space-y-4">
             <Card className="border-border bg-surface">
-              <CardContent className="p-6 space-y-4">
+              <CardContent className="p-4 sm:p-6 space-y-4">
                 <h3 className="font-display text-base font-extrabold text-ink">Internal Account Transfers History</h3>
-                <div className="overflow-x-auto">
+
+                {/* Mobile Stacked Cards (<640px) */}
+                <div className="sm:hidden space-y-2.5">
+                  {transfers.map((tr, idx) => (
+                    <div key={idx} className="rounded-xl border border-border bg-warm/40 p-3 space-y-2 text-xs">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-mono font-bold text-ink">{tr.reference_number || "TR-TF"}</span>
+                        <span className="font-mono font-bold text-brand-dark">{formatPkr(tr.amount_paisa)}</span>
+                      </div>
+                      <p className="text-muted break-words">{tr.description || "Internal transfer between wallets"}</p>
+                      <p className="font-mono text-[10px] text-muted pt-1 border-t border-border/60">{new Date(tr.transfer_date).toLocaleDateString()}</p>
+                    </div>
+                  ))}
+                  {transfers.length === 0 && (
+                    <p className="p-6 text-center text-xs text-muted">No internal transfers recorded yet.</p>
+                  )}
+                </div>
+
+                {/* Desktop & Tablet Table (>=640px) */}
+                <div className="hidden sm:block overflow-x-auto">
                   <table className="w-full text-left text-xs border-collapse">
                     <thead>
                       <tr className="border-b border-border bg-warm/60 text-muted">
@@ -466,7 +588,7 @@ export default async function FinancePage({ searchParams }: FinancePageProps) {
 
           <div>
             <Card className="border-border bg-surface">
-              <CardContent className="p-6 space-y-4">
+              <CardContent className="p-4 sm:p-6 space-y-4">
                 <h3 className="font-display text-sm font-extrabold text-ink flex items-center gap-2">
                   <ArrowRightLeft className="h-4 w-4 text-brand" /> Transfer Funds
                 </h3>

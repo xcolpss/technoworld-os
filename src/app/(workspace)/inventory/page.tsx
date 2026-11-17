@@ -2,6 +2,8 @@ import { redirect } from "next/navigation";
 import { PageHeader } from "@/components/ui/page-header";
 import { InventoryManager, type InventoryItemRecord, type CategoryRecord } from "@/components/inventory/inventory-manager";
 import { getAuthenticatedShopContext } from "@/lib/auth/session";
+import { hasRequiredRole } from "@/lib/auth/permissions";
+import { AccessRestricted } from "@/components/auth/access-restricted";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import {
   createCategoryAction,
@@ -16,6 +18,15 @@ import {
 export default async function InventoryPage() {
   const ctx = await getAuthenticatedShopContext();
   if (!ctx || !ctx.businessId) redirect("/login");
+  if (!hasRequiredRole(ctx.role, ["OWNER", "MANAGER"])) {
+    return (
+      <AccessRestricted
+        currentRole={ctx.role}
+        requiredRoles={["OWNER", "MANAGER"]}
+        sectionName="Inventory Management"
+      />
+    );
+  }
 
   const admin = createSupabaseAdminClient();
   const [{ data: rawCats }, { data: rawItems }] = await Promise.all([

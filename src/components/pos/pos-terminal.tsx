@@ -2082,10 +2082,10 @@ export function PosTerminal({
 
         {/* RIGHT SIDE (5 Cols): Ultra-Compact, Minimal, Zero-Scroll Customer Bill */}
         <div className="lg:col-span-5">
-          <Card className="sticky top-16">
+          <Card className="lg:sticky lg:top-16">
             <CardContent className="p-3.5 space-y-2.5">
               {/* Compact Header + Customer Name Inline */}
-              <div className="flex items-center justify-between gap-2 border-b border-border pb-2">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border pb-2">
                 <div className="flex items-center gap-1.5">
                   <ShoppingBag className="h-4 w-4 text-brand" />
                   <h2 className="font-display text-sm font-extrabold text-ink">
@@ -2093,7 +2093,7 @@ export function PosTerminal({
                   </h2>
                 </div>
 
-                <div className="relative flex-1 max-w-[200px]">
+                <div className="relative flex-1 min-w-[140px] sm:max-w-[200px]">
                   <User className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted" />
                   <Input
                     value={customerName}
@@ -2124,10 +2124,10 @@ export function PosTerminal({
                   {cart.map((line, index) => (
                     <div
                       key={`${line.code}-${index}`}
-                      className="flex items-center justify-between gap-2 px-2.5 py-1.5 text-xs"
+                      className="flex flex-wrap sm:flex-nowrap items-center justify-between gap-2 px-2.5 py-1.5 text-xs"
                     >
                       {/* Item Title */}
-                      <div className="min-w-0 flex-1">
+                      <div className="w-full sm:w-auto min-w-0 sm:flex-1">
                         <p className="truncate font-bold text-ink leading-tight">
                           {line.name}
                         </p>

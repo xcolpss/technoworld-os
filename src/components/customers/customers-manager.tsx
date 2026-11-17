@@ -207,7 +207,7 @@ export function CustomersManager({
           </CardContent>
         </Card>
 
-        <Card className="flex items-center justify-between p-4">
+        <Card className="flex flex-wrap items-center justify-between gap-3 p-4">
           <div>
             <p className="text-xs font-medium text-muted">New Account</p>
             <p className="mt-1 text-sm font-bold text-ink">Add Client or School</p>
@@ -246,8 +246,8 @@ export function CustomersManager({
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-12">
         {/* LEFT (5 Cols): Search & Customer List */}
         <div className="lg:col-span-5 space-y-3">
-          <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-border bg-surface p-3 shadow-xs">
-            <div className="relative flex-1 min-w-[140px]">
+          <div className="glass-panel flex flex-wrap items-center gap-2 rounded-2xl border p-3">
+            <div className="relative w-full min-[400px]:w-auto flex-1 min-w-0 min-[400px]:min-w-[140px]">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted" />
               <Input
                 value={search}
@@ -259,7 +259,7 @@ export function CustomersManager({
             <select
               value={typeFilter}
               onChange={(e) => setTypeFilter(e.target.value)}
-              className="h-9 rounded-xl border border-border bg-warm px-2.5 text-xs font-semibold"
+              className="h-9 w-full min-[400px]:w-auto rounded-xl border border-border bg-warm px-2.5 text-xs font-semibold"
             >
               <option value="ALL">All Types</option>
               <option value="REGULAR">Regular</option>
@@ -284,10 +284,10 @@ export function CustomersManager({
                     key={c.id}
                     type="button"
                     onClick={() => setSelectedCustId(c.id)}
-                    className={`w-full flex items-center justify-between gap-3 rounded-2xl border p-3.5 text-left transition-all active:scale-[0.99] ${
+                    className={`card-3d-tile w-full flex items-center justify-between gap-3 rounded-2xl border p-3.5 text-left cursor-pointer ${
                       isSelected
-                        ? "border-brand bg-brand-soft/30 shadow-xs"
-                        : "border-border bg-surface hover:border-brand/40"
+                        ? "border-[var(--primary)] bg-[var(--brand-soft)] shadow-[inset_0_1px_0_var(--glass-highlight),0_6px_18px_-4px_rgba(255,106,0,0.2)]"
+                        : "border-[var(--border)] bg-[var(--surface)] backdrop-blur-md hover:border-[var(--primary)]/40"
                     }`}
                   >
                     <div className="space-y-1 min-w-0">
@@ -337,19 +337,19 @@ export function CustomersManager({
         <div className="lg:col-span-7">
           {activeCustomer ? (
             <Card className="border-brand/30">
-              <CardContent className="p-5 space-y-5">
+              <CardContent className="p-4 sm:p-5 space-y-5">
                 {/* Customer Header & Repayment Button */}
-                <div className="flex flex-wrap items-center justify-between gap-4 border-b border-border pb-4">
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2.5">
-                      <h2 className="font-display text-lg font-extrabold text-ink">
+                <div className="flex flex-wrap items-center justify-between gap-3 sm:gap-4 border-b border-border pb-4">
+                  <div className="space-y-1 min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h2 className="font-display text-base sm:text-lg font-extrabold text-ink break-words">
                         {activeCustomer.name}
                       </h2>
                       <Badge variant="neutral">
                         {activeCustomer.customer_type}
                       </Badge>
                     </div>
-                    <p className="text-xs text-muted">
+                    <p className="text-xs text-muted break-words">
                       {activeCustomer.phone ?? "No Phone"} •{" "}
                       {activeCustomer.address ?? "No Address"}
                     </p>
@@ -358,6 +358,7 @@ export function CustomersManager({
                   <Button
                     type="button"
                     size="sm"
+                    className="w-full sm:w-auto"
                     onClick={() => setShowRepayModal(true)}
                   >
                     <Wallet className="h-4 w-4" />
@@ -366,7 +367,7 @@ export function CustomersManager({
                 </div>
 
                 {/* Balance Metrics */}
-                <div className="grid grid-cols-3 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 sm:gap-3">
                   <div className="rounded-xl border border-border bg-warm p-3">
                     <span className="text-[11px] font-semibold text-muted">
                       Current Udhaar
@@ -412,10 +413,10 @@ export function CustomersManager({
                         return (
                           <div
                             key={l.id}
-                            className="flex items-center justify-between gap-3 rounded-xl border border-border bg-surface p-3 text-xs"
+                            className="flex flex-wrap sm:flex-nowrap items-center justify-between gap-2 sm:gap-3 rounded-xl border border-border bg-surface p-3 text-xs"
                           >
-                            <div className="space-y-0.5 min-w-0">
-                              <div className="flex items-center gap-2">
+                            <div className="space-y-0.5 min-w-0 flex-1">
+                              <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
                                 <Badge
                                   variant={isRepay ? "success" : "danger"}
                                 >
@@ -460,8 +461,8 @@ export function CustomersManager({
 
       {/* MODAL: Add Customer */}
       {showAddModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="w-full max-w-md rounded-2xl border border-border bg-surface p-6 shadow-xl space-y-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm tw-backdrop-in p-3 sm:p-4">
+          <div className="glass-modal w-full max-w-md max-h-[90vh] overflow-y-auto rounded-2xl p-4 sm:p-6 space-y-4">
             <h3 className="font-display text-base font-extrabold text-ink">
               Register New Customer / Corporate Account
             </h3>
@@ -478,7 +479,7 @@ export function CustomersManager({
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <Label className="text-xs">Phone Number</Label>
                   <Input
@@ -553,8 +554,8 @@ export function CustomersManager({
 
       {/* MODAL: Record Repayment */}
       {showRepayModal && activeCustomer && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="w-full max-w-md rounded-2xl border border-border bg-surface p-6 shadow-xl space-y-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm tw-backdrop-in p-3 sm:p-4">
+          <div className="glass-modal w-full max-w-md max-h-[90vh] overflow-y-auto rounded-2xl p-4 sm:p-6 space-y-4">
             <h3 className="font-display text-base font-extrabold text-ink">
               Record Udhaar Repayment • {activeCustomer.name}
             </h3>

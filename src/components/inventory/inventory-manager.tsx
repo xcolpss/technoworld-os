@@ -260,7 +260,7 @@ export function InventoryManager({
 
       {/* Controls & Action Buttons */}
       <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
-        <div className="flex items-center gap-2 flex-1 max-w-md">
+        <div className="flex items-center gap-2 flex-1 sm:max-w-md">
           <div className="relative flex-1">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted" />
             <Input
@@ -272,12 +272,12 @@ export function InventoryManager({
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
-          <Button type="button" size="sm"  onClick={() => setShowCategoryModal(true)}>
-            <FolderCog className="h-4 w-4 mr-1" /> Manage Categories ({categories.length})
+        <div className="flex flex-wrap items-center gap-2">
+          <Button type="button" size="sm" variant="outline" className="flex-1 sm:flex-none" onClick={() => setShowCategoryModal(true)}>
+            <FolderCog className="h-4 w-4 shrink-0" /> Manage Categories ({categories.length})
           </Button>
-          <Button type="button" size="sm" onClick={openAddModal}>
-            <Plus className="h-4 w-4 mr-1" /> Add Product
+          <Button type="button" size="sm" className="flex-1 sm:flex-none" onClick={openAddModal}>
+            <Plus className="h-4 w-4 shrink-0" /> Add Product
           </Button>
         </div>
       </div>
@@ -296,8 +296,74 @@ export function InventoryManager({
         ))}
       </div>
 
-      {/* Compact Professional Inventory Table */}
-      <Card>
+      {/* Mobile Stacked Data Cards (<768px) */}
+      <div className="md:hidden space-y-2.5">
+        {filteredItems.length === 0 ? (
+          <Card>
+            <CardContent className="p-6 text-center text-xs text-muted">
+              No physical products found.
+            </CardContent>
+          </Card>
+        ) : (
+          filteredItems.map((item) => {
+            const isLow = item.stock_quantity <= item.min_stock_alert;
+            return (
+              <Card key={item.id}>
+                <CardContent className="p-3.5 space-y-3 text-xs">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="font-bold text-ink text-sm break-words">{item.name}</p>
+                      <p className="font-mono text-[10px] text-muted mt-0.5">
+                        {item.sku || "NO SKU"} • {item.category}
+                      </p>
+                    </div>
+                    <Badge variant={isLow ? "warning" : "success"} className="shrink-0">
+                      {isLow ? "Low Stock" : "In Stock"}
+                    </Badge>
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-2 rounded-xl bg-warm/60 p-2.5 font-mono text-center">
+                    <div>
+                      <p className="text-[10px] font-sans text-muted">Stock</p>
+                      <p className="font-extrabold text-ink">{item.stock_quantity} {item.unit}</p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] font-sans text-muted">Cost</p>
+                      <p className="font-semibold text-muted">{formatPkr(item.cost_price_paisa)}</p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] font-sans text-muted">Retail</p>
+                      <p className="font-bold text-brand-dark">{formatPkr(item.retail_price_paisa)}</p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between gap-2 pt-1 border-t border-border/60">
+                    <div className="flex items-center gap-1.5">
+                      <Button type="button" size="sm" variant="outline" className="h-8 w-8 p-0 text-xs" onClick={() => handleAdjust(item.id, -1)} title="Decrease Stock">
+                        -
+                      </Button>
+                      <Button type="button" size="sm" variant="outline" className="h-8 w-8 p-0 text-xs" onClick={() => handleAdjust(item.id, 1)} title="Increase Stock">
+                        +
+                      </Button>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <Button type="button" size="sm" variant="secondary" className="h-8 px-3 text-xs font-semibold" onClick={() => openEditModal(item)} title="Edit Product">
+                        <Edit className="h-3.5 w-3.5" /> Edit
+                      </Button>
+                      <Button type="button" size="sm" variant="ghost" className="h-8 w-8 p-0 text-[var(--danger)] hover:bg-[var(--danger-soft)]" onClick={() => handleDeleteProduct(item.id)} title="Delete Product">
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            );
+          })
+        )}
+      </div>
+
+      {/* Compact Professional Inventory Table (Desktop & Tablet >=768px) */}
+      <Card className="hidden md:block">
         <CardContent className="p-0 overflow-x-auto">
           <table className="w-full text-left text-xs border-collapse">
             <thead>
@@ -343,16 +409,16 @@ export function InventoryManager({
                       </td>
                       <td className="p-3 text-right">
                         <div className="flex items-center justify-end gap-1.5">
-                          <Button type="button" size="sm"  className="h-7 w-7 p-0 text-xs" onClick={() => handleAdjust(item.id, -1)} title="Decrease Stock">
+                          <Button type="button" size="sm" variant="outline" className="h-7 w-7 p-0 text-xs" onClick={() => handleAdjust(item.id, -1)} title="Decrease Stock">
                             -
                           </Button>
-                          <Button type="button" size="sm"  className="h-7 w-7 p-0 text-xs" onClick={() => handleAdjust(item.id, 1)} title="Increase Stock">
+                          <Button type="button" size="sm" variant="outline" className="h-7 w-7 p-0 text-xs" onClick={() => handleAdjust(item.id, 1)} title="Increase Stock">
                             +
                           </Button>
-                          <Button type="button" size="sm"  className="h-7 px-2.5 text-xs font-semibold" onClick={() => openEditModal(item)} title="Edit Product">
-                            <Edit className="h-3.5 w-3.5 mr-1" /> Edit
+                          <Button type="button" size="sm" variant="secondary" className="h-7 px-2.5 text-xs font-semibold" onClick={() => openEditModal(item)} title="Edit Product">
+                            <Edit className="h-3.5 w-3.5" /> Edit
                           </Button>
-                          <Button type="button" size="sm"  className="h-7 w-7 p-0 text-danger hover:bg-danger-soft border-danger/30" onClick={() => handleDeleteProduct(item.id)} title="Delete Product">
+                          <Button type="button" size="sm" variant="ghost" className="h-7 w-7 p-0 text-[var(--danger)] hover:bg-[var(--danger-soft)]" onClick={() => handleDeleteProduct(item.id)} title="Delete Product">
                             <Trash2 className="h-3.5 w-3.5" />
                           </Button>
                         </div>
@@ -368,11 +434,11 @@ export function InventoryManager({
 
       {/* MODAL: Manage Categories */}
       {showCategoryModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="w-full max-w-md rounded-2xl border border-border bg-surface p-6 shadow-xl space-y-4">
-            <div className="flex items-center justify-between border-b border-border pb-3">
-              <h3 className="font-display text-base font-extrabold text-ink">Manage Product Categories</h3>
-              <Button type="button" size="sm" variant="ghost" onClick={() => setShowCategoryModal(false)}>âœ•</Button>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm tw-backdrop-in p-3 sm:p-4">
+          <div className="glass-modal w-full max-w-md max-h-[90vh] overflow-y-auto rounded-2xl p-4 sm:p-6 space-y-4">
+            <div className="flex items-center justify-between border-b border-[var(--border)] pb-3">
+              <h3 className="font-display text-base font-extrabold text-[var(--foreground)]">Manage Product Categories</h3>
+              <Button type="button" size="sm" variant="ghost" onClick={() => setShowCategoryModal(false)}>✕</Button>
             </div>
 
             <form onSubmit={handleCategorySave} className="flex gap-2">
@@ -413,13 +479,13 @@ export function InventoryManager({
 
       {/* MODAL: Add / Edit Product (With Delete Option in Edit Settings) */}
       {showProductModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="w-full max-w-md rounded-2xl border border-border bg-surface p-6 shadow-xl space-y-4">
-            <div className="flex items-center justify-between border-b border-border pb-2">
-              <h3 className="font-display text-base font-extrabold text-ink">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm tw-backdrop-in p-3 sm:p-4">
+          <div className="glass-modal w-full max-w-md max-h-[90vh] overflow-y-auto rounded-2xl p-4 sm:p-6 space-y-4">
+            <div className="flex items-center justify-between border-b border-[var(--border)] pb-2">
+              <h3 className="font-display text-base font-extrabold text-[var(--foreground)]">
                 {editingItem ? "Edit Physical Product" : "Add Physical Product"}
               </h3>
-              <Button type="button" size="sm" variant="ghost" onClick={() => setShowProductModal(false)}>âœ•</Button>
+              <Button type="button" size="sm" variant="ghost" onClick={() => setShowProductModal(false)}>✕</Button>
             </div>
 
             <form onSubmit={handleSaveProduct} className="space-y-3.5">
@@ -428,7 +494,7 @@ export function InventoryManager({
                 <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Type-C Fast Cable 1m" className="mt-1 h-9 text-xs" required />
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 min-[400px]:grid-cols-2 gap-3">
                 <div>
                   <Label className="text-xs">SKU / Code</Label>
                   <Input value={sku} onChange={(e) => setSku(e.target.value)} className="mt-1 h-9 text-xs font-mono" />
@@ -448,7 +514,7 @@ export function InventoryManager({
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 min-[400px]:grid-cols-2 gap-3">
                 <div>
                   <Label className="text-xs">Stock Qty</Label>
                   <Input type="number" min="0" value={stockQty} onChange={(e) => setStockQty(e.target.value)} className="mt-1 h-9 text-xs font-mono" required />
@@ -459,7 +525,7 @@ export function InventoryManager({
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 min-[400px]:grid-cols-2 gap-3">
                 <div>
                   <Label className="text-xs">Retail Price (Rs.)</Label>
                   <Input type="number" min="0" value={retailPkr} onChange={(e) => setRetailPkr(e.target.value)} className="mt-1 h-9 font-mono text-xs" required />
@@ -475,21 +541,22 @@ export function InventoryManager({
                 <Input type="number" min="0" value={minAlert} onChange={(e) => setMinAlert(e.target.value)} className="mt-1 h-9 font-mono text-xs" required />
               </div>
 
-              <div className="flex items-center justify-between pt-2 border-t border-border">
+              <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-border">
                 {editingItem ? (
                   <Button
                     type="button"
-                    
-                    className="text-danger hover:bg-danger-soft border-danger/30 text-xs"
+                    size="sm"
+                    variant="danger"
+                    className="text-xs"
                     onClick={() => handleDeleteProduct(editingItem.id)}
                   >
-                    <Trash2 className="h-3.5 w-3.5 mr-1.5" /> Delete Product
+                    <Trash2 className="h-3.5 w-3.5" /> Delete Product
                   </Button>
                 ) : (
                   <div />
                 )}
 
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 ml-auto">
                   <Button type="button" size="sm" variant="ghost" onClick={() => setShowProductModal(false)}>Cancel</Button>
                   <Button type="submit" size="sm">{editingItem ? "Update Product" : "Save Product"}</Button>
                 </div>

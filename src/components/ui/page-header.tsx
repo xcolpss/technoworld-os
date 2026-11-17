@@ -17,24 +17,33 @@ export function PageHeader({
   actions,
 }: PageHeaderProps) {
   return (
-    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-      <div className="space-y-1">
+    <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between pb-1">
+      <div className="space-y-1.5 min-w-0">
         {eyebrow && (
-          <p className="text-xs font-bold uppercase tracking-wider text-brand">
-            {eyebrow}
-          </p>
+          <div className="inline-flex items-center gap-2 rounded-full border border-[var(--primary)]/20 bg-[var(--brand-soft)] px-2.5 py-0.5">
+            <span className="h-1.5 w-1.5 rounded-full bg-[var(--primary)]" />
+            <p className="text-[10px] sm:text-[11px] font-bold uppercase tracking-wider text-[var(--primary-hover)] dark:text-[var(--primary)] break-words">
+              {eyebrow}
+            </p>
+          </div>
         )}
-        <div className="flex flex-wrap items-center gap-2.5">
-          <h1 className="font-display text-2xl sm:text-3xl font-extrabold tracking-tight text-ink">
+        <div className="flex flex-wrap items-center gap-2 sm:gap-2.5">
+          <h1 className="font-display text-xl sm:text-2xl lg:text-[28px] font-extrabold tracking-[-0.025em] text-[var(--foreground)]">
             {title}
           </h1>
           {badge && <Badge variant="brand">{badge}</Badge>}
         </div>
         {description && (
-          <p className="max-w-2xl text-sm text-muted">{description}</p>
+          <p className="max-w-2xl text-xs sm:text-sm text-[var(--foreground-secondary)] leading-relaxed">
+            {description}
+          </p>
         )}
       </div>
-      {actions && <div className="flex items-center gap-2.5">{actions}</div>}
+      {actions && (
+        <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+          {actions}
+        </div>
+      )}
     </div>
   );
 }

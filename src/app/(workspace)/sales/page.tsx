@@ -40,9 +40,9 @@ export default async function SalesHistoryPage() {
       .eq("business_id", ctx.businessId),
     admin
       .from("audit_logs")
-      .select("entity_id, before_state, after_state, created_at")
+      .select("action_type, description, metadata, created_at")
       .eq("business_id", ctx.businessId)
-      .eq("action", "SALE_EDITED")
+      .eq("action_type", "SALE_EDITED")
       .order("created_at", { ascending: false }),
     admin
       .from("products")
@@ -62,17 +62,23 @@ export default async function SalesHistoryPage() {
   for (const row of (rawItems ?? []) as Array<Record<string, unknown>>) {
     const saleId = String(row.sale_id);
     const list = itemsBySale.get(saleId) ?? [];
-    const kindVal = String(row["item_kind"] ?? "PRODUCT");
+    const kindVal = String(row["item_kind"] ?? (row.product_id ? "PRODUCT" : "SERVICE"));
+    const qty = Math.max(1, Number(row.quantity ?? 1));
+    const lineTotal = Number(row.line_total_paisa ?? row.total_paisa ?? 0);
+    const unitPrice = Number(row.unit_price_paisa ?? Math.round(lineTotal / qty));
+    const unitCost = Number(
+      row.unit_cost_snapshot_paisa ?? row.unit_cost_paisa ?? row.cost_price_paisa ?? 0
+    );
     list.push({
       id: String(row.id),
       kind: kindVal === "PRODUCT" ? "PRODUCT" : "SERVICE",
       product_id: row.product_id ? String(row.product_id) : null,
       service_id: row.service_id ? String(row.service_id) : null,
-      description: String(row["description"] ?? "Item"),
-      quantity: Number(row.quantity ?? 1),
-      unit_price_paisa: Number(row.unit_price_paisa ?? 0),
-      unit_cost_paisa: Number(row.unit_cost_paisa ?? 0),
-      line_total_paisa: Number(row.line_total_paisa ?? 0),
+      description: String(row["description"] ?? row["item_name"] ?? "Item"),
+      quantity: qty,
+      unit_price_paisa: unitPrice,
+      unit_cost_paisa: unitCost,
+      line_total_paisa: lineTotal,
     });
     itemsBySale.set(saleId, list);
   }
@@ -84,10 +90,11 @@ export default async function SalesHistoryPage() {
 
   const editInfoBySale = new Map<string, string>();
   for (const log of (editLogs ?? []) as Array<Record<string, unknown>>) {
-    const sid = String(log.entity_id ?? "");
+    const meta = (log.metadata ?? {}) as Record<string, unknown>;
+    const sid = String(meta.entity_id ?? "");
     if (!sid || editInfoBySale.has(sid)) continue;
-    const before = (log.before_state ?? {}) as Record<string, unknown>;
-    const after = (log.after_state ?? {}) as Record<string, unknown>;
+    const before = (meta.before_state ?? {}) as Record<string, unknown>;
+    const after = (meta.after_state ?? {}) as Record<string, unknown>;
     const oldRs = Math.round(Number(before.total_paisa ?? 0) / 100);
     const newRs = Math.round(Number(after.total_paisa ?? 0) / 100);
     editInfoBySale.set(sid, `Modified (Rs. ${oldRs} → Rs. ${newRs})`);

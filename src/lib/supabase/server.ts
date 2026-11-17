@@ -1,5 +1,11 @@
-﻿import { createServerClient } from "@supabase/ssr";
+import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
+import {
+  PERSISTENCE_COOKIE_NAME,
+  normalizeAuthCookieOptions,
+  parsePersistenceMode,
+  type SerializedCookieItem,
+} from "@/lib/supabase/cookie-persistence";
 import { getSupabaseBrowserEnv } from "@/lib/supabase/env";
 
 export async function createSupabaseServerClient() {
@@ -18,10 +24,17 @@ export async function createSupabaseServerClient() {
       getAll() {
         return cookieStore.getAll();
       },
-      setAll(cookiesToSet) {
+      setAll(cookiesToSet: SerializedCookieItem[]) {
         try {
+          const mode = parsePersistenceMode(
+            cookieStore.get(PERSISTENCE_COOKIE_NAME)?.value
+          );
           cookiesToSet.forEach(({ name, value, options }) =>
-            cookieStore.set(name, value, options)
+            cookieStore.set(
+              name,
+              value,
+              normalizeAuthCookieOptions(name, options, mode)
+            )
           );
         } catch {
           // Called from a Server Component where setting cookies is ignored.

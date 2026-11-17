@@ -137,22 +137,22 @@ export function ShiftsManager({
   return (
     <div className="space-y-6">
       {/* Schedule Banner */}
-      <div className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-border bg-surface p-4 shadow-xs">
-        <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-brand-soft text-brand">
+      <div className="glass-card flex flex-wrap items-center justify-between gap-4 rounded-2xl p-4">
+        <div className="flex items-start sm:items-center gap-3 min-w-0">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[var(--brand-soft)] text-[var(--primary)] border border-[var(--primary)]/20">
             <Clock className="h-5 w-5" />
           </div>
-          <div>
-            <h2 className="font-display text-sm font-extrabold text-ink">
+          <div className="min-w-0">
+            <h2 className="font-display text-sm font-extrabold text-[var(--foreground)]">
               Scheduled Shift Hours (PKT)
             </h2>
-            <p className="text-xs text-muted">
+            <p className="text-xs text-[var(--foreground-secondary)]">
               Shift 1: <strong>08:00 – 16:00</strong> • Shift 2: <strong>16:00 – 00:00</strong> (Optional / Flexible)
             </p>
           </div>
         </div>
 
-        <Button type="button" onClick={() => setShowOpenModal(true)}>
+        <Button type="button" className="w-full sm:w-auto" onClick={() => setShowOpenModal(true)}>
           <Play className="h-4 w-4" />
           Start New Shift
         </Button>
@@ -210,12 +210,12 @@ export function ShiftsManager({
 
               return (
                 <Card key={sess.id} className="border-brand/40 bg-brand-soft/10">
-                  <CardContent className="p-5 space-y-4">
-                    <div className="flex items-center justify-between border-b border-border pb-3">
-                      <div className="flex items-center gap-2">
-                        <Monitor className="h-5 w-5 text-brand" />
-                        <div>
-                          <span className="font-bold text-sm text-ink">
+                  <CardContent className="p-4 sm:p-5 space-y-4">
+                    <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border pb-3">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <Monitor className="h-5 w-5 text-brand shrink-0" />
+                        <div className="min-w-0">
+                          <span className="font-bold text-sm text-ink block truncate">
                             {sess.terminal_code} — {sess.terminal_name}
                           </span>
                           <p className="text-[10px] text-muted">Opened at {sess.opened_pk}</p>
@@ -225,7 +225,7 @@ export function ShiftsManager({
                     </div>
 
                     {/* Financial Summary Breakdown */}
-                    <div className="grid grid-cols-2 gap-2.5 text-xs">
+                    <div className="grid grid-cols-1 min-[380px]:grid-cols-2 gap-2.5 text-xs">
                       <div className="rounded-xl bg-surface border border-border p-3 space-y-1">
                         <span className="text-[11px] font-semibold text-muted">Shift Earnings</span>
                         <p className="font-mono text-base font-extrabold text-brand-dark">
@@ -244,7 +244,7 @@ export function ShiftsManager({
                     {/* Payment Account Breakdown */}
                     <div className="rounded-xl bg-surface border border-border p-3 space-y-2 text-xs">
                       <p className="text-[11px] font-bold uppercase text-muted">Earnings by Account</p>
-                      <div className="grid grid-cols-2 gap-2 font-mono">
+                      <div className="grid grid-cols-1 min-[400px]:grid-cols-2 gap-2 font-mono">
                         <div className="flex justify-between">
                           <span className="text-muted font-sans">Cash Sales:</span>
                           <span className="font-bold">{formatPkr(fin.cashSalesPaisa)}</span>
@@ -264,7 +264,7 @@ export function ShiftsManager({
                       </div>
                     </div>
 
-                    <div className="rounded-xl bg-warm p-3 flex items-center justify-between text-xs">
+                    <div className="rounded-xl bg-warm p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
                       <div>
                         <span className="text-muted">Opening Float: {formatPkr(sess.opening_float_paisa)}</span>
                         <p className="font-mono text-sm font-extrabold text-ink">
@@ -274,6 +274,7 @@ export function ShiftsManager({
                       <Button
                         type="button"
                         size="sm"
+                        className="w-full sm:w-auto"
                         onClick={() => {
                           setClosingSession(sess);
                           setActualCountPkr(
@@ -361,8 +362,8 @@ export function ShiftsManager({
 
       {/* MODAL: Open New Shift */}
       {showOpenModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="w-full max-w-md rounded-2xl border border-border bg-surface p-6 shadow-xl space-y-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm tw-backdrop-in p-3 sm:p-4">
+          <div className="glass-modal w-full max-w-md max-h-[90vh] overflow-y-auto rounded-2xl p-4 sm:p-6 space-y-4">
             <h3 className="font-display text-base font-extrabold text-ink">
               Start New Counter Shift
             </h3>
@@ -398,7 +399,7 @@ export function ShiftsManager({
                 </p>
               </div>
 
-              <div className="flex items-center justify-end gap-2 pt-2">
+              <div className="flex flex-wrap items-center justify-end gap-2 pt-2">
                 <Button
                   type="button"
                   size="sm"
@@ -418,8 +419,8 @@ export function ShiftsManager({
 
       {/* MODAL: Reconcile & Close Shift */}
       {closingSession && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="w-full max-w-md rounded-2xl border border-border bg-surface p-6 shadow-xl space-y-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm tw-backdrop-in p-3 sm:p-4">
+          <div className="glass-modal w-full max-w-md max-h-[90vh] overflow-y-auto rounded-2xl p-4 sm:p-6 space-y-4">
             <h3 className="font-display text-base font-extrabold text-ink">
               Shift Handover &amp; Reconciliation • {closingSession.terminal_code}
             </h3>
@@ -465,7 +466,7 @@ export function ShiftsManager({
                 />
               </div>
 
-              <div className="flex items-center justify-end gap-2 pt-2">
+              <div className="flex flex-wrap items-center justify-end gap-2 pt-2">
                 <Button
                   type="button"
                   size="sm"
@@ -474,7 +475,7 @@ export function ShiftsManager({
                 >
                   Cancel
                 </Button>
-                <Button type="submit" size="sm">
+                <Button type="submit" size="sm" className="w-full min-[400px]:w-auto">
                   Complete Handover &amp; Start Next Shift
                 </Button>
               </div>

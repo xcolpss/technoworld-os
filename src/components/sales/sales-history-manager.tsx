@@ -28,10 +28,18 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input, Label } from "@/components/ui/input";
 import { formatPkr, pkrToPaisa } from "@/lib/format/currency";
+import {
+  CompactPrintButton,
+  ThermalReceiptSheet,
+  ThermalWidthSelector,
+  useThermalPaperWidth,
+  useThermalReceiptPrint,
+  type ThermalReceiptData,
+} from "@/components/pos/thermal-receipt";
 import type {
   EditableSaleLine,
   UpdateSalePayload,
-} from "@/app/(workspace)/sales-history/actions";
+} from "@/app/(workspace)/sales/actions";
 
 export interface CatalogPickerOption {
   id: string;
@@ -100,8 +108,41 @@ export function SalesHistoryManager({
     sales[0]?.id ?? null
   );
   const [reprintSale, setReprintSale] = React.useState<SaleRecord | null>(null);
+  const [paperWidth, setPaperWidth] = useThermalPaperWidth();
+  const pendingReprintRef = React.useRef(false);
   const [statusBanner, setStatusBanner] = React.useState<string | null>(null);
   const [isPending, startTransition] = React.useTransition();
+
+  const thermalReprintData: ThermalReceiptData | null = React.useMemo(() => {
+    if (!reprintSale) return null;
+    return {
+      invoiceRef: `#${reprintSale.sale_number}`,
+      dateLabel: `${reprintSale.date_pk} • ${reprintSale.time_pk}`,
+      customerName: reprintSale.customer_name,
+      items: reprintSale.lines.map((l) => ({
+        name: l.description,
+        quantity: l.quantity,
+        unitPricePaisa: l.unit_price_paisa,
+        lineTotalPaisa: l.line_total_paisa,
+      })),
+      subtotalPaisa: reprintSale.subtotal_paisa,
+      discountPaisa: reprintSale.discount_paisa,
+      grandTotalPaisa: reprintSale.total_paisa,
+      paymentMethod: reprintSale.payment_method,
+    };
+  }, [reprintSale]);
+
+  const { triggerPrint } = useThermalReceiptPrint(
+    thermalReprintData,
+    paperWidth
+  );
+
+  React.useEffect(() => {
+    if (thermalReprintData && pendingReprintRef.current) {
+      pendingReprintRef.current = false;
+      triggerPrint();
+    }
+  }, [thermalReprintData, triggerPrint]);
 
   // --- Bill Editor State ---
   const [editingSaleId, setEditingSaleId] = React.useState<string | null>(null);
@@ -292,10 +333,8 @@ export function SalesHistoryManager({
     .reduce((sum, s) => sum + s.total_paisa, 0);
 
   function triggerThermalReprint(sale: SaleRecord) {
+    pendingReprintRef.current = true;
     setReprintSale(sale);
-    window.setTimeout(() => {
-      window.print();
-    }, 200);
   }
 
   function handleVoid(sale: SaleRecord) {
@@ -319,63 +358,16 @@ export function SalesHistoryManager({
 
   return (
     <div className="space-y-6">
-      {/* Edge-to-Edge 72mm Thermal Print CSS */}
-      <style jsx global>{`
-        @media print {
-          @page {
-            size: 80mm auto;
-            margin: 0mm;
-          }
-          html,
-          body {
-            width: 100% !important;
-            height: auto !important;
-            margin: 0 !important;
-            padding: 0 !important;
-            background: #ffffff !important;
-            -webkit-print-color-adjust: exact !important;
-            print-color-adjust: exact !important;
-          }
-          body * {
-            visibility: hidden !important;
-          }
-          #thermal-reprint-sheet,
-          #thermal-reprint-sheet * {
-            visibility: visible !important;
-          }
-          #thermal-reprint-sheet {
-            position: fixed !important;
-            left: 0 !important;
-            right: 0 !important;
-            top: 0 !important;
-            width: 100% !important;
-            max-width: 100% !important;
-            box-sizing: border-box !important;
-            padding: 2mm 1mm 5mm 1mm !important;
-            margin: 0 !important;
-            background: #ffffff !important;
-            color: #000000 !important;
-            font-family: "Segoe UI", Arial, Helvetica, sans-serif !important;
-            box-shadow: none !important;
-            border: none !important;
-            border-radius: 0 !important;
-          }
-        }
-      `}</style>
-
       {/* Thermal Receipt Reprint Box */}
-      {reprintSale && (
+      {reprintSale && thermalReprintData && (
         <Card className="border-brand/40 bg-brand-soft/20">
           <CardContent className="p-4 space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <p className="text-sm font-bold text-ink">
-                Thermal Receipt Ready â€¢ Bill #{reprintSale.sale_number}
+                Thermal Receipt Ready • Bill #{reprintSale.sale_number}
               </p>
               <div className="flex items-center gap-2">
-                <Button type="button" size="sm" onClick={() => window.print()}>
-                  <Printer className="h-4 w-4" />
-                  Print Again
-                </Button>
+                <CompactPrintButton onClick={triggerPrint} label="Print Again" />
                 <Button
                   type="button"
                   size="sm"
@@ -387,146 +379,19 @@ export function SalesHistoryManager({
               </div>
             </div>
 
-            <div
-              id="thermal-reprint-sheet"
-              className="mx-auto w-full max-w-[340px] rounded-xl border border-border bg-white p-4 text-black shadow-sm"
-            >
-              <div className="text-center border-b-2 border-black pb-2.5">
-                <div className="mx-auto mb-1.5 flex items-center justify-center">
-                  <svg
-                    width="156"
-                    height="38"
-                    viewBox="0 0 156 38"
-                    fill="none"
-                    xmlns="http://www.w3.org/2000/svg"
-                    className="mx-auto"
-                  >
-                    <rect
-                      x="1"
-                      y="1"
-                      width="36"
-                      height="36"
-                      rx="7"
-                      fill="#000000"
-                    />
-                    <path
-                      d="M8 12H20V15.5H15.8V27H12.2V15.5H8V12ZM20.5 12H24L25.6 21.2L27.6 12H30.4L32.4 21.2L34 12H37.5L34.2 27H30.9L29 18.2L27.1 27H23.8L20.5 12Z"
-                      fill="#FFFFFF"
-                    />
-                    <text
-                      x="44"
-                      y="17"
-                      fill="#000000"
-                      fontFamily="Arial, Helvetica, sans-serif"
-                      fontWeight="900"
-                      fontSize="14"
-                      letterSpacing="0.5"
-                    >
-                      TECHNO
-                    </text>
-                    <text
-                      x="44"
-                      y="32"
-                      fill="#000000"
-                      fontFamily="Arial, Helvetica, sans-serif"
-                      fontWeight="900"
-                      fontSize="14"
-                      letterSpacing="1.2"
-                    >
-                      WORLD
-                    </text>
-                  </svg>
-                </div>
-                <p className="text-[11px] font-extrabold uppercase tracking-wider text-black">
-                  Computers â€¢ Printing â€¢ Accessories
-                </p>
-                <p className="text-[10px] font-semibold text-black mt-0.5">
-                  Rawalpindi â€¢ Sales &amp; Digital Services
-                </p>
-              </div>
-
-              <div className="py-2 border-b-2 border-black text-[11px] space-y-1">
-                <div className="flex justify-between">
-                  <span className="font-bold">INVOICE:</span>
-                  <span className="font-mono font-extrabold">
-                    #{reprintSale.sale_number}
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="font-bold">DATE:</span>
-                  <span className="font-mono font-semibold">
-                    {reprintSale.date_pk} â€¢ {reprintSale.time_pk}
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="font-bold">CUSTOMER:</span>
-                  <span className="font-extrabold uppercase">
-                    {reprintSale.customer_name}
-                  </span>
-                </div>
-              </div>
-
-              <div className="flex justify-between border-b border-black py-1.5 text-[11px] font-black uppercase">
-                <span>Description</span>
-                <span>Total</span>
-              </div>
-
-              <div className="divide-y divide-dashed divide-black border-b-2 border-black">
-                {reprintSale.lines.map((l) => (
-                  <div key={l.id} className="py-1.5">
-                    <div className="flex justify-between items-start gap-2 text-[12px]">
-                      <span className="font-extrabold leading-tight flex-1">
-                        {l.description}
-                      </span>
-                      <span className="font-mono font-black whitespace-nowrap">
-                        {formatPkr(l.line_total_paisa)}
-                      </span>
-                    </div>
-                    <div className="text-[11px] font-mono font-semibold mt-0.5">
-                      Qty: {l.quantity} Ã— {formatPkr(l.unit_price_paisa)}
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              <div className="py-2 space-y-1 text-[12px]">
-                <div className="flex justify-between font-semibold">
-                  <span>Subtotal</span>
-                  <span className="font-mono font-bold">
-                    {formatPkr(reprintSale.subtotal_paisa)}
-                  </span>
-                </div>
-                {reprintSale.discount_paisa > 0 && (
-                  <div className="flex justify-between font-semibold">
-                    <span>Discount</span>
-                    <span className="font-mono font-bold">
-                      -{formatPkr(reprintSale.discount_paisa)}
-                    </span>
-                  </div>
-                )}
-
-                <div className="flex justify-between items-center border-y-2 border-black py-1.5 my-1.5 text-[14px] font-black">
-                  <span>GRAND TOTAL</span>
-                  <span className="font-mono text-[16px]">
-                    {formatPkr(reprintSale.total_paisa)}
-                  </span>
-                </div>
-
-                <div className="flex justify-between text-[11px] font-bold">
-                  <span>PAYMENT METHOD</span>
-                  <span className="uppercase">{reprintSale.payment_method}</span>
-                </div>
-              </div>
-
-              <div className="border-t-2 border-black pt-2 text-center space-y-0.5">
-                <p className="text-[11px] font-black uppercase tracking-wide">
-                  Thank You For Visiting Techno World!
-                </p>
-                <p className="text-[10px] font-semibold">
-                  Goods once sold are exchangeable within 3 days with receipt
-                </p>
-              </div>
+            <div className="max-w-[302px] mx-auto">
+              <ThermalWidthSelector
+                value={paperWidth}
+                onChange={setPaperWidth}
+                itemCount={thermalReprintData.items.length}
+                hasDiscount={thermalReprintData.discountPaisa > 0}
+              />
             </div>
+
+            <ThermalReceiptSheet
+              data={thermalReprintData}
+              paperWidth={paperWidth}
+            />
           </CardContent>
         </Card>
       )}
@@ -556,7 +421,7 @@ export function SalesHistoryManager({
             </div>
             <div>
               <p className="text-sm font-extrabold text-danger">
-                Owner Audit Alert: {voidedCount} Voided â€¢ {editedCount} Edited Bill
+                Owner Audit Alert: {voidedCount} Voided • {editedCount} Edited Bill
                 {flaggedCount === 1 ? "" : "s"}
               </p>
               <p className="text-xs text-ink/80">
@@ -584,7 +449,7 @@ export function SalesHistoryManager({
       )}
 
       {/* 1. Daily Closing Summary KPI Cards */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 sm:gap-4">
+      <div className="grid grid-cols-1 min-[380px]:grid-cols-2 gap-3 sm:grid-cols-4 sm:gap-4">
         <Card>
           <CardContent className="p-4">
             <div className="flex items-center justify-between">
@@ -640,7 +505,7 @@ export function SalesHistoryManager({
               {formatPkr(digitalTotalPaisa)}
             </p>
             <p className="mt-0.5 text-[10px] text-muted truncate">
-              JC: {formatPkr(jazzCashPaisa)} â€¢ EP: {formatPkr(easyPaisaPaisa)} â€¢ Bank:{" "}
+              JC: {formatPkr(jazzCashPaisa)} • EP: {formatPkr(easyPaisaPaisa)} • Bank:{" "}
               {formatPkr(bankPaisa)}
             </p>
           </CardContent>
@@ -648,9 +513,9 @@ export function SalesHistoryManager({
       </div>
 
       {/* 2. Date Range, Audit Status, Payment & Search Filter Bar */}
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-border bg-surface p-3.5 shadow-xs">
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="flex rounded-xl border border-border bg-warm p-1">
+      <div className="glass-panel flex flex-wrap items-center justify-between gap-3 rounded-2xl border p-3.5">
+        <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+          <div className="flex rounded-xl border border-border bg-warm p-1 w-full sm:w-auto">
             {(
               [
                 { id: "TODAY", label: "Today" },
@@ -662,7 +527,7 @@ export function SalesHistoryManager({
                 key={tab.id}
                 type="button"
                 onClick={() => setDateScope(tab.id)}
-                className={`rounded-lg px-3 py-1.5 text-xs font-bold transition ${
+                className={`flex-1 sm:flex-none rounded-lg px-2.5 sm:px-3 py-1.5 text-xs font-bold transition ${
                   dateScope === tab.id
                     ? "bg-brand text-white shadow-xs"
                     : "text-muted hover:text-ink"
@@ -674,13 +539,13 @@ export function SalesHistoryManager({
           </div>
 
           {dateScope === "CUSTOM" && (
-            <div className="relative">
+            <div className="relative w-full sm:w-auto">
               <Calendar className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted" />
               <Input
                 type="date"
                 value={customDate}
                 onChange={(e) => setCustomDate(e.target.value)}
-                className="h-9 pl-8 text-xs"
+                className="h-9 pl-8 text-xs w-full sm:w-auto"
               />
             </div>
           )}
@@ -692,7 +557,7 @@ export function SalesHistoryManager({
                 e.target.value as "ALL" | "FLAGGED" | "VOIDED" | "EDITED"
               )
             }
-            className="h-9 rounded-xl border border-border bg-warm px-3 text-xs font-semibold text-ink"
+            className="h-9 flex-1 sm:flex-none min-w-[130px] rounded-xl border border-border bg-warm px-3 text-xs font-semibold text-ink"
           >
             <option value="ALL">All Bills ({dateScopedSales.length})</option>
             <option value="FLAGGED">Voided &amp; Edited ({flaggedCount})</option>
@@ -703,7 +568,7 @@ export function SalesHistoryManager({
           <select
             value={paymentFilter}
             onChange={(e) => setPaymentFilter(e.target.value)}
-            className="h-9 rounded-xl border border-border bg-warm px-3 text-xs font-semibold text-ink"
+            className="h-9 flex-1 sm:flex-none min-w-[130px] rounded-xl border border-border bg-warm px-3 text-xs font-semibold text-ink"
           >
             <option value="ALL">All Payments</option>
             <option value="CASH">Cash Only</option>
@@ -713,7 +578,7 @@ export function SalesHistoryManager({
           </select>
         </div>
 
-        <div className="relative flex-1 min-w-[200px] sm:max-w-xs">
+        <div className="relative w-full sm:w-auto flex-1 min-w-0 sm:min-w-[200px] sm:max-w-xs">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
           <Input
             value={searchQuery}
@@ -819,15 +684,15 @@ export function SalesHistoryManager({
                       </div>
 
                       <p className="text-xs text-muted">
-                        {sale.date_pk} at {sale.time_pk} â€¢ {sale.lines.length}{" "}
+                        {sale.date_pk} at {sale.time_pk} • {sale.lines.length}{" "}
                         {sale.lines.length === 1 ? "item" : "items"}
-                        {sale.edit_summary ? ` â€¢ ${sale.edit_summary}` : ""}
+                        {sale.edit_summary ? ` • ${sale.edit_summary}` : ""}
                       </p>
                     </div>
 
                     {/* Right: Amount, Profit & Action Buttons */}
-                    <div className="flex flex-wrap items-center gap-2">
-                      <div className="text-right mr-1">
+                    <div className="flex flex-wrap items-center justify-between sm:justify-end gap-2 w-full sm:w-auto pt-2 sm:pt-0 border-t sm:border-t-0 border-border/60">
+                      <div className="text-left sm:text-right mr-1">
                         <p
                           className={`font-mono text-base font-extrabold ${
                             isVoided ? "line-through text-danger" : "text-ink"
@@ -846,66 +711,68 @@ export function SalesHistoryManager({
                         )}
                       </div>
 
-                      <Button
-                        type="button"
-                        size="sm"
-                        
-                        onClick={() => triggerThermalReprint(sale)}
-                      >
-                        <Printer className="h-3.5 w-3.5" />
-                        Reprint
-                      </Button>
+                      <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={() => triggerThermalReprint(sale)}
+                        >
+                          <Printer className="h-3.5 w-3.5" />
+                          Reprint
+                        </Button>
 
-                      {!isVoided && (
-                        <>
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant={isEditing ? "primary" : "secondary"}
-                            onClick={() =>
-                              isEditing
-                                ? setEditingSaleId(null)
-                                : openBillEditor(sale)
-                            }
-                          >
-                            <Edit3 className="h-3.5 w-3.5" />
-                            {isEditing ? "Close Edit" : "Edit Bill"}
-                          </Button>
+                        {!isVoided && (
+                          <>
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant={isEditing ? "primary" : "secondary"}
+                              onClick={() =>
+                                isEditing
+                                  ? setEditingSaleId(null)
+                                  : openBillEditor(sale)
+                              }
+                            >
+                              <Edit3 className="h-3.5 w-3.5" />
+                              {isEditing ? "Close Edit" : "Edit Bill"}
+                            </Button>
 
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="ghost"
-                            disabled={isPending}
-                            onClick={() => handleVoid(sale)}
-                            className="text-danger hover:bg-danger-soft"
-                          >
-                            <Ban className="h-3.5 w-3.5" />
-                            Void
-                          </Button>
-                        </>
-                      )}
-
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setExpandedId(isExpanded ? null : sale.id)
-                        }
-                        className="rounded-lg p-1.5 text-muted hover:bg-warm hover:text-ink"
-                        title="Toggle Bill Items"
-                      >
-                        {isExpanded ? (
-                          <ChevronUp className="h-4 w-4" />
-                        ) : (
-                          <ChevronDown className="h-4 w-4" />
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="ghost"
+                              disabled={isPending}
+                              onClick={() => handleVoid(sale)}
+                              className="text-danger hover:bg-danger-soft"
+                            >
+                              <Ban className="h-3.5 w-3.5" />
+                              Void
+                            </Button>
+                          </>
                         )}
-                      </button>
+
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setExpandedId(isExpanded ? null : sale.id)
+                          }
+                          className="rounded-lg p-1.5 text-muted hover:bg-warm hover:text-ink"
+                          title="Toggle Bill Items"
+                        >
+                          {isExpanded ? (
+                            <ChevronUp className="h-4 w-4" />
+                          ) : (
+                            <ChevronDown className="h-4 w-4" />
+                          )}
+                        </button>
+                      </div>
                     </div>
                   </div>
 
                   {/* FULL INLINE BILL EDITOR (Add, Edit or Remove Items/Prints, Customer & Payment) */}
                   {isEditing && (
-                    <div className="mt-3 rounded-2xl border-2 border-brand/40 bg-surface p-4 space-y-4">
+                    <div className="mt-3 rounded-2xl border-2 border-brand/40 bg-surface p-3.5 sm:p-4 space-y-4">
                       <div className="flex items-center justify-between border-b border-border pb-2.5">
                         <div>
                           <h3 className="font-display text-sm font-extrabold text-ink">
@@ -978,7 +845,7 @@ export function SalesHistoryManager({
                             key={idx}
                             className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border bg-warm/40 p-2.5"
                           >
-                            <div className="flex-1 min-w-[160px]">
+                            <div className="w-full sm:w-auto sm:flex-1 sm:min-w-[160px]">
                               <Input
                                 value={line.description}
                                 onChange={(e) => {
@@ -1049,7 +916,7 @@ export function SalesHistoryManager({
                               />
                             </div>
 
-                            <span className="font-mono text-xs font-extrabold w-20 text-right">
+                            <span className="font-mono text-xs font-extrabold sm:w-20 text-right">
                               {formatPkr(line.quantity * line.unit_price_paisa)}
                             </span>
 
@@ -1082,7 +949,7 @@ export function SalesHistoryManager({
                               onChange={(e) =>
                                 setSelectedCatalogId(e.target.value)
                               }
-                              className="h-9 flex-1 rounded-xl border border-border bg-surface px-2.5 text-xs font-medium"
+                              className="h-9 flex-1 min-w-0 rounded-xl border border-border bg-surface px-2.5 text-xs font-medium"
                             >
                               <option value="">Choose item...</option>
                               {catalogOptions.map((opt) => (
@@ -1107,14 +974,14 @@ export function SalesHistoryManager({
                           <Label className="text-[11px]">
                             + Add Extra Print / Custom Job
                           </Label>
-                          <div className="flex gap-1.5">
+                          <div className="flex flex-wrap sm:flex-nowrap gap-1.5">
                             <Input
                               value={customLineLabel}
                               onChange={(e) =>
                                 setCustomLineLabel(e.target.value)
                               }
                               placeholder="e.g. Color Print Legal"
-                              className="h-9 flex-1 text-xs"
+                              className="h-9 w-full sm:w-auto sm:flex-1 text-xs"
                             />
                             <Input
                               type="number"
@@ -1122,7 +989,7 @@ export function SalesHistoryManager({
                               value={customLineQty}
                               onChange={(e) => setCustomLineQty(e.target.value)}
                               placeholder="Qty"
-                              className="h-9 w-14 text-xs"
+                              className="h-9 flex-1 sm:flex-none sm:w-14 text-xs"
                             />
                             <Input
                               type="number"
@@ -1132,7 +999,7 @@ export function SalesHistoryManager({
                                 setCustomLineRate(e.target.value)
                               }
                               placeholder="Rs."
-                              className="h-9 w-16 text-xs"
+                              className="h-9 flex-1 sm:flex-none sm:w-16 text-xs"
                             />
                             <Button
                               type="button"
@@ -1154,7 +1021,7 @@ export function SalesHistoryManager({
                             {formatPkr(editNetTotalPaisa)}
                           </strong>
                         </div>
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
                           <Button
                             type="button"
                             size="sm"
@@ -1185,26 +1052,26 @@ export function SalesHistoryManager({
                       {sale.lines.map((line) => (
                         <div
                           key={line.id}
-                          className={`flex items-center justify-between text-xs py-1 px-2.5 rounded-lg ${
+                          className={`flex items-center justify-between gap-2 text-xs py-1 px-2.5 rounded-lg ${
                             isVoided ? "bg-danger-soft/40" : "bg-warm/50"
                           }`}
                         >
-                          <div>
+                          <div className="min-w-0">
                             <span
-                              className={`font-bold ${
+                              className={`font-bold break-words ${
                                 isVoided
                                   ? "line-through text-danger"
                                   : "text-ink"
                               }`}
                             >
-                              {line.quantity}Ã— {line.description}
+                              {line.quantity}× {line.description}
                             </span>
-                            <span className="ml-2 font-mono text-[11px] text-muted">
+                            <span className="ml-1.5 sm:ml-2 font-mono text-[11px] text-muted">
                               (@ {formatPkr(line.unit_price_paisa)})
                             </span>
                           </div>
                           <span
-                            className={`font-mono font-bold ${
+                            className={`font-mono font-bold shrink-0 ${
                               isVoided ? "line-through text-danger" : "text-ink"
                             }`}
                           >

@@ -1,5 +1,11 @@
-﻿import { createServerClient } from "@supabase/ssr";
+import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
+import {
+  PERSISTENCE_COOKIE_NAME,
+  normalizeAuthCookieOptions,
+  parsePersistenceMode,
+  type SerializedCookieItem,
+} from "@/lib/supabase/cookie-persistence";
 
 const PROTECTED_PREFIXES = [
   "/dashboard",
@@ -9,6 +15,7 @@ const PROTECTED_PREFIXES = [
   "/finance",
   "/expenses",
   "/employees",
+  "/staff",
   "/shifts",
   "/customers",
   "/reports",
@@ -29,12 +36,16 @@ export async function updateSession(request: NextRequest) {
     return supabaseResponse;
   }
 
+  const persistenceMode = parsePersistenceMode(
+    request.cookies.get(PERSISTENCE_COOKIE_NAME)?.value
+  );
+
   const supabase = createServerClient(url, anonKey, {
     cookies: {
       getAll() {
         return request.cookies.getAll();
       },
-      setAll(cookiesToSet) {
+      setAll(cookiesToSet: SerializedCookieItem[]) {
         cookiesToSet.forEach(({ name, value }) =>
           request.cookies.set(name, value)
         );
@@ -42,31 +53,40 @@ export async function updateSession(request: NextRequest) {
           request,
         });
         cookiesToSet.forEach(({ name, value, options }) =>
-          supabaseResponse.cookies.set(name, value, options)
+          supabaseResponse.cookies.set(
+            name,
+            value,
+            normalizeAuthCookieOptions(name, options, persistenceMode)
+          )
         );
       },
     },
   });
 
-  // getSession() validates the signed JWT cookie locally (<1ms) instead of a remote network round-trip on every click
+  // getUser() validates the access token with Supabase Auth and triggers secure refresh when needed
   const {
-    data: { session },
-  } = await supabase.auth.getSession();
+    data: { user },
+  } = await supabase.auth.getUser();
 
   const pathname = request.nextUrl.pathname;
   const isProtected = PROTECTED_PREFIXES.some(
     (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`)
   );
 
-  if (!session?.user && isProtected) {
+  if (!user && isProtected) {
     const loginUrl = request.nextUrl.clone();
     loginUrl.pathname = "/login";
+    const fullTarget = `${pathname}${request.nextUrl.search}`;
+    if (fullTarget && fullTarget !== "/login") {
+      loginUrl.searchParams.set("next", fullTarget);
+    }
     return NextResponse.redirect(loginUrl);
   }
 
-  if (session?.user && pathname === "/login") {
+  if (user && pathname === "/login") {
     const dashUrl = request.nextUrl.clone();
     dashUrl.pathname = "/dashboard";
+    dashUrl.search = "";
     return NextResponse.redirect(dashUrl);
   }
 

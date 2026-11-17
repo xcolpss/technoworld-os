@@ -2,7 +2,13 @@ import { redirect } from "next/navigation";
 import { PageHeader } from "@/components/ui/page-header";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import {
+  AllocationStackedBar,
+  MetricBarChart,
+} from "@/components/ui/mini-charts";
 import { getAuthenticatedShopContext } from "@/lib/auth/session";
+import { hasRequiredRole } from "@/lib/auth/permissions";
+import { AccessRestricted } from "@/components/auth/access-restricted";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { formatPkr } from "@/lib/format/currency";
 import { FileText, TrendingUp, DollarSign, Boxes, ShieldCheck, Printer } from "lucide-react";
@@ -10,6 +16,15 @@ import { FileText, TrendingUp, DollarSign, Boxes, ShieldCheck, Printer } from "l
 export default async function ReportsPage() {
   const ctx = await getAuthenticatedShopContext();
   if (!ctx || !ctx.businessId) redirect("/login");
+  if (!hasRequiredRole(ctx.role, ["OWNER", "MANAGER"])) {
+    return (
+      <AccessRestricted
+        currentRole={ctx.role}
+        requiredRoles={["OWNER", "MANAGER"]}
+        sectionName="Financial & Business Reports"
+      />
+    );
+  }
 
   const admin = createSupabaseAdminClient();
 
@@ -72,34 +87,126 @@ export default async function ReportsPage() {
       {/* Summary Stat Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <Card className="border-brand/30 bg-brand-soft/10">
-          <CardContent className="p-5 space-y-1">
+          <CardContent className="p-4 sm:p-5 space-y-1">
             <span className="text-xs font-bold text-muted">Net Revenue</span>
-            <p className="font-mono text-2xl font-extrabold text-ink">{formatPkr(netSales)}</p>
+            <p className="font-mono text-xl sm:text-2xl font-extrabold text-ink">{formatPkr(netSales)}</p>
             <p className="text-[10px] text-muted">{sales.length} total sales recorded</p>
           </CardContent>
         </Card>
 
         <Card className="border-success/30 bg-success-soft/10">
-          <CardContent className="p-5 space-y-1">
+          <CardContent className="p-4 sm:p-5 space-y-1">
             <span className="text-xs font-bold text-success">Gross Profit (FIFO)</span>
-            <p className="font-mono text-2xl font-extrabold text-success">{formatPkr(grossProfit)}</p>
+            <p className="font-mono text-xl sm:text-2xl font-extrabold text-success">{formatPkr(grossProfit)}</p>
             <p className="text-[10px] text-muted">Net Sales minus Cost of Goods Sold</p>
           </CardContent>
         </Card>
 
         <Card className="border-border bg-surface">
-          <CardContent className="p-5 space-y-1">
+          <CardContent className="p-4 sm:p-5 space-y-1">
             <span className="text-xs font-bold text-muted">Operating Expenses</span>
-            <p className="font-mono text-2xl font-extrabold text-danger">{formatPkr(totalOperatingExpenses)}</p>
+            <p className="font-mono text-xl sm:text-2xl font-extrabold text-danger">{formatPkr(totalOperatingExpenses)}</p>
             <p className="text-[10px] text-muted">{expenses.length} expense entries recorded</p>
           </CardContent>
         </Card>
 
         <Card className="border-purple-500/30 bg-purple-500/10">
-          <CardContent className="p-5 space-y-1">
-            <span className="text-xs font-bold text-purple-700">Net Operating Profit</span>
-            <p className="font-mono text-2xl font-extrabold text-purple-900">{formatPkr(netOperatingProfit)}</p>
+          <CardContent className="p-4 sm:p-5 space-y-1">
+            <span className="text-xs font-bold text-purple-600 dark:text-purple-400">Net Operating Profit</span>
+            <p className="font-mono text-xl sm:text-2xl font-extrabold text-purple-900 dark:text-purple-200">{formatPkr(netOperatingProfit)}</p>
             <p className="text-[10px] text-muted">Gross Profit minus Operating Expenses</p>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Interactive Financial Visualization */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-6">
+        <Card className="lg:col-span-7">
+          <CardContent className="p-4 sm:p-6">
+            <MetricBarChart
+              title="P&L Performance Breakdown"
+              subtitle="Live comparison across revenue, COGS, expenses & operating profit"
+              height={176}
+              data={[
+                {
+                  label: "Net Sales",
+                  value: netSales,
+                  formattedValue: formatPkr(netSales),
+                  tone: "brand",
+                },
+                {
+                  label: "Gross Profit",
+                  value: grossProfit,
+                  formattedValue: formatPkr(grossProfit),
+                  tone: "success",
+                },
+                {
+                  label: "COGS",
+                  value: cogs,
+                  formattedValue: formatPkr(cogs),
+                  tone: "neutral",
+                },
+                {
+                  label: "OpEx",
+                  value: totalOperatingExpenses,
+                  formattedValue: formatPkr(totalOperatingExpenses),
+                  tone: "danger",
+                },
+                {
+                  label: "Net Profit",
+                  value: netOperatingProfit,
+                  formattedValue: formatPkr(netOperatingProfit),
+                  tone: "info",
+                },
+              ]}
+            />
+          </CardContent>
+        </Card>
+
+        <Card className="lg:col-span-5">
+          <CardContent className="p-4 sm:p-6 flex flex-col justify-center space-y-6">
+            <div className="space-y-1">
+              <h3 className="font-display text-sm sm:text-base font-extrabold text-[var(--foreground)]">
+                Asset &amp; Equity Composition
+              </h3>
+              <p className="text-[11px] text-[var(--foreground-secondary)]">
+                Balance sheet distribution across liquid wallets and physical stock
+              </p>
+            </div>
+            <AllocationStackedBar
+              title="Total Assets Mix"
+              segments={[
+                {
+                  label: "Cash & Wallets",
+                  value: totalCashAndWallets,
+                  formattedValue: formatPkr(totalCashAndWallets),
+                  tone: "info",
+                },
+                {
+                  label: "Inventory Value",
+                  value: inventoryValuation,
+                  formattedValue: formatPkr(inventoryValuation),
+                  tone: "brand",
+                },
+              ]}
+            />
+            <AllocationStackedBar
+              title="Capital vs Drawings"
+              segments={[
+                {
+                  label: "Owner Capital",
+                  value: totalOwnerCapital,
+                  formattedValue: formatPkr(totalOwnerCapital),
+                  tone: "success",
+                },
+                {
+                  label: "Drawings",
+                  value: totalDrawings,
+                  formattedValue: formatPkr(totalDrawings),
+                  tone: "danger",
+                },
+              ]}
+            />
           </CardContent>
         </Card>
       </div>
@@ -108,43 +215,43 @@ export default async function ReportsPage() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Profit & Loss Statement */}
         <Card className="border-border bg-surface">
-          <CardContent className="p-6 space-y-4">
-            <div className="flex items-center justify-between border-b border-border pb-3">
+          <CardContent className="p-4 sm:p-6 space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border pb-3">
               <div className="flex items-center gap-2">
-                <TrendingUp className="h-5 w-5 text-brand" />
-                <h3 className="font-display text-base font-extrabold text-ink">Profit &amp; Loss Statement</h3>
+                <TrendingUp className="h-5 w-5 text-brand shrink-0" />
+                <h3 className="font-display text-sm sm:text-base font-extrabold text-ink">Profit &amp; Loss Statement</h3>
               </div>
               <Badge variant="brand" className="font-mono text-xs">Asia/Karachi</Badge>
             </div>
 
             <div className="space-y-2.5 text-xs font-mono">
-              <div className="flex justify-between p-2.5 bg-warm rounded-xl">
+              <div className="flex flex-wrap items-center justify-between gap-1 p-2.5 bg-warm rounded-xl">
                 <span className="text-muted">Gross Sales Revenue:</span>
                 <span className="font-bold text-ink">{formatPkr(grossSales)}</span>
               </div>
-              <div className="flex justify-between p-2.5 bg-warm rounded-xl">
+              <div className="flex flex-wrap items-center justify-between gap-1 p-2.5 bg-warm rounded-xl">
                 <span className="text-muted">Discounts &amp; Refunds:</span>
                 <span className="font-bold text-danger">- {formatPkr(totalDiscounts + totalRefunds)}</span>
               </div>
-              <div className="flex justify-between p-2.5 bg-brand-soft/20 rounded-xl border border-brand/20">
+              <div className="flex flex-wrap items-center justify-between gap-1 p-2.5 bg-brand-soft/20 rounded-xl border border-brand/20">
                 <span className="font-bold text-brand-dark">Net Revenue:</span>
                 <span className="font-extrabold text-brand-dark">{formatPkr(netSales)}</span>
               </div>
-              <div className="flex justify-between p-2.5 bg-warm rounded-xl">
+              <div className="flex flex-wrap items-center justify-between gap-1 p-2.5 bg-warm rounded-xl">
                 <span className="text-muted">Cost of Goods Sold (COGS):</span>
                 <span className="font-bold text-danger">- {formatPkr(cogs)}</span>
               </div>
-              <div className="flex justify-between p-2.5 bg-success-soft/20 rounded-xl border border-success/30">
+              <div className="flex flex-wrap items-center justify-between gap-1 p-2.5 bg-success-soft/20 rounded-xl border border-success/30">
                 <span className="font-bold text-success">Gross Profit:</span>
                 <span className="font-extrabold text-success">{formatPkr(grossProfit)}</span>
               </div>
-              <div className="flex justify-between p-2.5 bg-warm rounded-xl">
+              <div className="flex flex-wrap items-center justify-between gap-1 p-2.5 bg-warm rounded-xl">
                 <span className="text-muted">Total Operating Expenses:</span>
                 <span className="font-bold text-danger">- {formatPkr(totalOperatingExpenses)}</span>
               </div>
-              <div className="flex justify-between p-3 bg-purple-500/10 rounded-xl border border-purple-500/30">
-                <span className="font-bold text-purple-900">Net Operating Profit:</span>
-                <span className="font-extrabold text-purple-900">{formatPkr(netOperatingProfit)}</span>
+              <div className="flex flex-wrap items-center justify-between gap-1 p-3 bg-purple-500/10 rounded-xl border border-purple-500/30">
+                <span className="font-bold text-purple-900 dark:text-purple-200">Net Operating Profit:</span>
+                <span className="font-extrabold text-purple-900 dark:text-purple-200">{formatPkr(netOperatingProfit)}</span>
               </div>
             </div>
           </CardContent>
@@ -152,37 +259,37 @@ export default async function ReportsPage() {
 
         {/* Balance Sheet Summary */}
         <Card className="border-border bg-surface">
-          <CardContent className="p-6 space-y-4">
-            <div className="flex items-center justify-between border-b border-border pb-3">
+          <CardContent className="p-4 sm:p-6 space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border pb-3">
               <div className="flex items-center gap-2">
-                <DollarSign className="h-5 w-5 text-brand" />
-                <h3 className="font-display text-base font-extrabold text-ink">Balance Sheet &amp; Valuation</h3>
+                <DollarSign className="h-5 w-5 text-brand shrink-0" />
+                <h3 className="font-display text-sm sm:text-base font-extrabold text-ink">Balance Sheet &amp; Valuation</h3>
               </div>
               <Badge variant="success" className="font-mono text-xs">Balanced</Badge>
             </div>
 
             <div className="space-y-2.5 text-xs font-mono">
-              <div className="flex justify-between p-2.5 bg-warm rounded-xl">
+              <div className="flex flex-wrap items-center justify-between gap-1 p-2.5 bg-warm rounded-xl">
                 <span className="text-muted">Cash &amp; Digital Wallets:</span>
                 <span className="font-bold text-ink">{formatPkr(totalCashAndWallets)}</span>
               </div>
-              <div className="flex justify-between p-2.5 bg-warm rounded-xl">
+              <div className="flex flex-wrap items-center justify-between gap-1 p-2.5 bg-warm rounded-xl">
                 <span className="text-muted">Inventory Stock Valuation:</span>
                 <span className="font-bold text-ink">{formatPkr(inventoryValuation)}</span>
               </div>
-              <div className="flex justify-between p-2.5 bg-brand-soft/20 rounded-xl border border-brand/20">
+              <div className="flex flex-wrap items-center justify-between gap-1 p-2.5 bg-brand-soft/20 rounded-xl border border-brand/20">
                 <span className="font-bold text-brand-dark">Total Assets:</span>
                 <span className="font-extrabold text-brand-dark">{formatPkr(totalAssets)}</span>
               </div>
-              <div className="flex justify-between p-2.5 bg-warm rounded-xl">
+              <div className="flex flex-wrap items-center justify-between gap-1 p-2.5 bg-warm rounded-xl">
                 <span className="text-muted">Owner Capital Contributions:</span>
                 <span className="font-bold text-success">{formatPkr(totalOwnerCapital)}</span>
               </div>
-              <div className="flex justify-between p-2.5 bg-warm rounded-xl">
+              <div className="flex flex-wrap items-center justify-between gap-1 p-2.5 bg-warm rounded-xl">
                 <span className="text-muted">Household Drawings &amp; Use:</span>
                 <span className="font-bold text-danger">- {formatPkr(totalDrawings)}</span>
               </div>
-              <div className="flex justify-between p-3 bg-success-soft/20 rounded-xl border border-success/30">
+              <div className="flex flex-wrap items-center justify-between gap-1 p-3 bg-success-soft/20 rounded-xl border border-success/30">
                 <span className="font-bold text-success">Total Retained Equity:</span>
                 <span className="font-extrabold text-success">{formatPkr(retainedEquity)}</span>
               </div>

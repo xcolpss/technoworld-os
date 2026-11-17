@@ -480,7 +480,7 @@ export function ExpensesManager({
   return (
     <div className="space-y-5">
       {/* 1. Live 5-Account Treasury Bar (Cash in Till, Cash in Hand, EasyPaisa, JazzCash, Bank) */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+      <div className="grid grid-cols-1 min-[360px]:grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
         <Card className="border-brand/30 bg-brand-soft/30">
           <CardContent className="p-3.5">
             <div className="flex items-center justify-between">
@@ -536,10 +536,10 @@ export function ExpensesManager({
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-12">
         {/* LEFT (5 Cols): Action Switcher (Log Expense | Transfer | Till/Hand Split | Manual Adjust) */}
         <div className="lg:col-span-5">
-          <Card className="border-brand/30 sticky top-20">
+          <Card className="border-brand/30 lg:sticky lg:top-20">
             <CardContent className="p-4 sm:p-5 space-y-4">
               {/* 4-Way Action Tabs */}
-              <div className="grid grid-cols-2 gap-1.5 rounded-xl border border-border bg-warm p-1 sm:grid-cols-4">
+              <div className="grid grid-cols-2 gap-1.5 rounded-xl border border-[var(--border)] bg-[var(--warm)] p-1 sm:grid-cols-4">
                 {(
                   [
                     { id: "EXPENSE", label: "+ Expense" },
@@ -555,10 +555,10 @@ export function ExpensesManager({
                       setPanelMode(t.id);
                       setFeedback(null);
                     }}
-                    className={`rounded-lg py-2 px-1.5 text-[11px] font-extrabold transition ${
+                    className={`rounded-lg py-2 px-1.5 text-[11px] font-extrabold transition-all duration-200 cursor-pointer ${
                       panelMode === t.id
-                        ? "bg-brand text-white shadow-xs"
-                        : "text-muted hover:text-ink"
+                        ? "bg-gradient-to-r from-[#FF7B1C] to-[#FF6A00] text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.28),0_2px_8px_rgba(255,106,0,0.3)]"
+                        : "text-[var(--foreground-secondary)] hover:text-[var(--foreground)] hover:bg-[var(--surface)]/60"
                     }`}
                   >
                     {t.label}
@@ -569,10 +569,10 @@ export function ExpensesManager({
               {/* MODE 1: RECORD EXPENSE (With Manage Categories + Exact 5-Account Selector) */}
               {panelMode === "EXPENSE" && (
                 <div className="space-y-3.5">
-                  <div className="flex items-center justify-between border-b border-border pb-2.5">
-                    <div>
+                  <div className="flex flex-wrap items-start sm:items-center justify-between gap-2 border-b border-border pb-2.5">
+                    <div className="min-w-0">
                       <h2 className="font-display text-sm font-extrabold text-ink flex items-center gap-1.5">
-                        <ReceiptText className="h-4 w-4 text-brand" />
+                        <ReceiptText className="h-4 w-4 text-brand shrink-0" />
                         Record Shop Expense
                       </h2>
                       <p className="text-[11px] text-muted">
@@ -701,7 +701,7 @@ export function ExpensesManager({
                       />
                     </div>
 
-                    <div className="grid grid-cols-2 gap-2.5">
+                    <div className="grid grid-cols-1 min-[380px]:grid-cols-2 gap-2.5">
                       <div>
                         <Label htmlFor="expAmount" className="text-xs">
                           Amount (Rs.)
@@ -744,10 +744,10 @@ export function ExpensesManager({
                             key={acc.id}
                             type="button"
                             onClick={() => setPaymentSource(acc.id)}
-                            className={`rounded-xl border py-2 px-2 text-left transition active:scale-95 ${
+                            className={`card-3d-tile rounded-xl border py-2 px-2 text-left cursor-pointer ${
                               paymentSource === acc.id
-                                ? "border-brand bg-brand text-white shadow-xs"
-                                : "border-border bg-surface text-ink hover:bg-warm"
+                                ? "border-[var(--primary)] bg-gradient-to-br from-[#FF7B1C] to-[#FF6A00] text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.28),0_4px_12px_-2px_rgba(255,106,0,0.35)]"
+                                : "border-[var(--border)] bg-[var(--surface)] text-[var(--foreground)] hover:border-[var(--primary)]/35"
                             }`}
                           >
                             <p className="text-[11px] font-extrabold leading-tight">
@@ -826,7 +826,7 @@ export function ExpensesManager({
                     </p>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-2.5">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                     <div>
                       <Label className="text-xs">From Account</Label>
                       <select
@@ -909,7 +909,7 @@ export function ExpensesManager({
                     </p>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-2.5 rounded-xl bg-warm p-3 text-xs">
+                  <div className="grid grid-cols-1 min-[380px]:grid-cols-2 gap-2.5 rounded-xl bg-warm p-3 text-xs">
                     <div>
                       <span className="text-muted">Current Cash in Till:</span>
                       <p className="font-mono text-sm font-extrabold text-ink">
@@ -953,12 +953,14 @@ export function ExpensesManager({
                   <Button
                     type="submit"
                     disabled={isPending}
-                    className="h-10 w-full text-xs"
+                    className="h-auto min-h-10 py-2 w-full text-xs text-center"
                   >
-                    <HandCoins className="h-4 w-4" />
-                    {isPending
-                      ? "Updating..."
-                      : "Confirm Till Float & Move Cash to Hand"}
+                    <HandCoins className="h-4 w-4 shrink-0" />
+                    <span>
+                      {isPending
+                        ? "Updating..."
+                        : "Confirm Till Float & Move Cash to Hand"}
+                    </span>
                   </Button>
                 </form>
               )}
@@ -1062,13 +1064,13 @@ export function ExpensesManager({
 
         {/* RIGHT (7 Cols): Expense Ledger & Account Transfers/Adjustments History */}
         <div className="lg:col-span-7 space-y-4">
-          <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-border bg-surface p-3 shadow-xs">
-            <div className="flex flex-wrap items-center gap-1.5">
-              <div className="flex rounded-xl border border-border bg-warm p-1">
+          <div className="glass-panel flex flex-wrap items-center justify-between gap-2 rounded-2xl border p-3">
+            <div className="flex flex-wrap items-center gap-1.5 w-full sm:w-auto">
+              <div className="flex flex-wrap rounded-xl border border-border bg-warm p-1 w-full sm:w-auto">
                 <button
                   type="button"
                   onClick={() => setRightTab("EXPENSES")}
-                  className={`rounded-lg px-3 py-1.5 text-xs font-bold transition ${
+                  className={`flex-1 sm:flex-none rounded-lg px-2.5 sm:px-3 py-1.5 text-xs font-bold transition ${
                     rightTab === "EXPENSES"
                       ? "bg-brand text-white shadow-xs"
                       : "text-muted hover:text-ink"
@@ -1079,7 +1081,7 @@ export function ExpensesManager({
                 <button
                   type="button"
                   onClick={() => setRightTab("MOVEMENTS")}
-                  className={`rounded-lg px-3 py-1.5 text-xs font-bold transition ${
+                  className={`flex-1 sm:flex-none rounded-lg px-2.5 sm:px-3 py-1.5 text-xs font-bold transition ${
                     rightTab === "MOVEMENTS"
                       ? "bg-brand text-white shadow-xs"
                       : "text-muted hover:text-ink"
@@ -1098,7 +1100,7 @@ export function ExpensesManager({
                         e.target.value as "TODAY" | "ALL" | "CUSTOM"
                       )
                     }
-                    className="h-9 rounded-xl border border-border bg-warm px-2.5 text-xs font-semibold text-ink"
+                    className="h-9 flex-1 sm:flex-none rounded-xl border border-border bg-warm px-2.5 text-xs font-semibold text-ink"
                   >
                     <option value="TODAY">Today</option>
                     <option value="ALL">All Dates</option>
@@ -1106,13 +1108,13 @@ export function ExpensesManager({
                   </select>
 
                   {dateFilter === "CUSTOM" && (
-                    <div className="relative">
+                    <div className="relative w-full sm:w-auto">
                       <Calendar className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted" />
                       <Input
                         type="date"
                         value={customDate}
                         onChange={(e) => setCustomDate(e.target.value)}
-                        className="h-9 pl-8 text-xs"
+                        className="h-9 pl-8 text-xs w-full sm:w-auto"
                       />
                     </div>
                   )}
@@ -1120,7 +1122,7 @@ export function ExpensesManager({
                   <select
                     value={accountFilter}
                     onChange={(e) => setAccountFilter(e.target.value)}
-                    className="h-9 rounded-xl border border-border bg-warm px-2.5 text-xs font-semibold text-ink"
+                    className="h-9 flex-1 sm:flex-none rounded-xl border border-border bg-warm px-2.5 text-xs font-semibold text-ink"
                   >
                     <option value="ALL">All Accounts</option>
                     {ACCOUNT_META.map((a) => (
@@ -1134,7 +1136,7 @@ export function ExpensesManager({
             </div>
 
             {rightTab === "EXPENSES" && (
-              <div className="relative flex-1 min-w-[160px] sm:max-w-[220px]">
+              <div className="relative w-full sm:w-auto flex-1 min-w-0 sm:min-w-[160px] sm:max-w-[220px]">
                 <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted" />
                 <Input
                   value={search}

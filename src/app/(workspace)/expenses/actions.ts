@@ -174,14 +174,17 @@ export async function deleteExpenseAction(expenseId: string) {
 
   await admin.from("audit_logs").insert({
     business_id: ctx.businessId,
-    actor_profile_id: ctx.userId,
-    action: "EXPENSE_DELETED",
-    entity_type: "expenses",
-    entity_id: expenseId,
-    before_state: {
-      description: exp.description,
-      amount_paisa: amountPaisa,
-      payment_source: sourceVal,
+    actor_name: ctx.fullName,
+    action_type: "EXPENSE_DELETED",
+    description: `Deleted expense: ${exp.description}`,
+    metadata: {
+      entity_type: "expenses",
+      entity_id: expenseId,
+      before_state: {
+        description: exp.description,
+        amount_paisa: amountPaisa,
+        payment_source: sourceVal,
+      },
     },
   });
 
@@ -259,15 +262,18 @@ export async function transferBetweenAccountsAction(
 
   await admin.from("audit_logs").insert({
     business_id: ctx.businessId,
-    actor_profile_id: ctx.userId,
-    action: "ACCOUNT_TRANSFER",
-    entity_type: "account_movements",
-    entity_id: mov.id,
-    after_state: {
-      from: payload.fromAccount,
-      to: payload.toAccount,
-      amount_paisa: amountPaisa,
-      reason,
+    actor_name: ctx.fullName,
+    action_type: "ACCOUNT_TRANSFER",
+    description: `Transferred Rs. ${Math.round(amountPaisa / 100)} from ${payload.fromAccount} to ${payload.toAccount}`,
+    metadata: {
+      entity_type: "account_movements",
+      entity_id: mov.id,
+      after_state: {
+        from: payload.fromAccount,
+        to: payload.toAccount,
+        amount_paisa: amountPaisa,
+        reason,
+      },
     },
   });
 
@@ -334,19 +340,22 @@ export async function adjustAccountBalanceAction(payload: AdjustAccountPayload) 
 
   await admin.from("audit_logs").insert({
     business_id: ctx.businessId,
-    actor_profile_id: ctx.userId,
-    action: "ACCOUNT_MANUAL_ADJUSTMENT",
-    entity_type: "account_movements",
-    entity_id: mov.id,
-    before_state: {
-      account: payload.account,
-      previous_paisa: currentPaisa,
-    },
-    after_state: {
-      account: payload.account,
-      actual_paisa: actualPaisa,
-      delta_paisa: deltaPaisa,
-      reason,
+    actor_name: ctx.fullName,
+    action_type: "ACCOUNT_MANUAL_ADJUSTMENT",
+    description: `Manual reconciliation adjustment on ${payload.account}`,
+    metadata: {
+      entity_type: "account_movements",
+      entity_id: mov.id,
+      before_state: {
+        account: payload.account,
+        previous_paisa: currentPaisa,
+      },
+      after_state: {
+        account: payload.account,
+        actual_paisa: actualPaisa,
+        delta_paisa: deltaPaisa,
+        reason,
+      },
     },
   });
 

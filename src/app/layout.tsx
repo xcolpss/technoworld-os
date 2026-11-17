@@ -31,7 +31,7 @@ export default function RootLayout({
           }}
         />
       </head>
-      <body className="bg-[var(--background)] text-[var(--foreground)] antialiased transition-colors duration-200">
+      <body className="bg-[var(--background)] text-[var(--foreground)] antialiased selection:bg-[var(--primary)]/20 selection:text-[var(--foreground)] transition-colors duration-200">
         <ThemeSync />
         {children}
       </body>

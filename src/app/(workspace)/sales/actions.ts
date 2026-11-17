@@ -130,12 +130,15 @@ export async function voidSaleAction(saleId: string) {
 
   await admin.from("audit_logs").insert({
     business_id: ctx.businessId,
-    actor_profile_id: ctx.userId,
-    action: "SALE_VOIDED",
-    entity_type: "sales",
-    entity_id: saleId,
-    before_state: { total_paisa: sale.total_paisa, status: sale.status },
-    after_state: { status: "VOIDED" },
+    actor_name: ctx.fullName,
+    action_type: "SALE_VOIDED",
+    description: `Voided sale #${sale.receipt_number ?? saleId.slice(0, 8)}`,
+    metadata: {
+      entity_type: "sales",
+      entity_id: saleId,
+      before_state: { total_paisa: sale.total_paisa, status: sale.status },
+      after_state: { status: "VOIDED" },
+    },
   });
 
   revalidatePath("/sales");
@@ -352,19 +355,22 @@ export async function updateExistingSaleAction(payload: UpdateSalePayload) {
   // 6. Log permanent audit trail entry so owner can review every edited bill
   await admin.from("audit_logs").insert({
     business_id: ctx.businessId,
-    actor_profile_id: ctx.userId,
-    action: "SALE_EDITED",
-    entity_type: "sales",
-    entity_id: payload.saleId,
-    before_state: {
-      total_paisa: oldSale.total_paisa,
-      payment_method: oldPayment?.method ?? "CASH",
-      item_count: (oldItems ?? []).length,
-    },
-    after_state: {
-      total_paisa: newTotalPaisa,
-      payment_method: payload.paymentMethod,
-      item_count: payload.lines.length,
+    actor_name: ctx.fullName,
+    action_type: "SALE_EDITED",
+    description: `Edited sale #${oldSale.receipt_number ?? payload.saleId.slice(0, 8)}`,
+    metadata: {
+      entity_type: "sales",
+      entity_id: payload.saleId,
+      before_state: {
+        total_paisa: oldSale.total_paisa,
+        payment_method: oldPayment?.method ?? "CASH",
+        item_count: (oldItems ?? []).length,
+      },
+      after_state: {
+        total_paisa: newTotalPaisa,
+        payment_method: payload.paymentMethod,
+        item_count: payload.lines.length,
+      },
     },
   });
 

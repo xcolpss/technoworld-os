@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import * as React from "react";
 import { X } from "lucide-react";
@@ -18,32 +18,49 @@ export function Dialog({
   description,
   children,
 }: DialogProps) {
+  React.useEffect(() => {
+    if (!open) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [open, onClose]);
+
   if (!open) return null;
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-ink/45 p-4 backdrop-blur-[1px]"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-3 sm:p-4 backdrop-blur-sm tw-backdrop-in"
       role="dialog"
       aria-modal="true"
+      onClick={onClose}
     >
-      <div className="w-full max-w-lg rounded-2xl border border-border bg-surface shadow-xl">
-        <div className="flex items-start justify-between border-b border-border px-6 py-4">
-          <div>
-            <h2 className="text-lg font-semibold text-ink">{title}</h2>
+      <div
+        className="glass-modal w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-start justify-between gap-2 border-b border-[var(--border)] px-4 py-3.5 sm:px-6 sm:py-4">
+          <div className="min-w-0">
+            <h2 className="font-display text-base sm:text-lg font-bold tracking-tight text-[var(--foreground)]">
+              {title}
+            </h2>
             {description && (
-              <p className="mt-0.5 text-sm text-muted">{description}</p>
+              <p className="mt-0.5 text-xs sm:text-sm text-[var(--foreground-secondary)]">
+                {description}
+              </p>
             )}
           </div>
           <button
             type="button"
             onClick={onClose}
             aria-label="Close dialog"
-            className="rounded-lg p-1.5 text-muted hover:bg-warm hover:text-ink cursor-pointer"
+            className="rounded-xl p-1.5 text-[var(--muted)] hover:bg-[var(--warm)] hover:text-[var(--foreground)] transition cursor-pointer shrink-0"
           >
             <X className="h-5 w-5" />
           </button>
         </div>
-        <div className="p-6">{children}</div>
+        <div className="p-4 sm:p-6">{children}</div>
       </div>
     </div>
   );

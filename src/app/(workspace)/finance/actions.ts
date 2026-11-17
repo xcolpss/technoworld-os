@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { getAuthenticatedShopContext } from "@/lib/auth/session";
+import { assertAuthorizedRole } from "@/lib/auth/permissions";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { pkrToPaisa } from "@/lib/format/currency";
 
@@ -10,6 +11,7 @@ import { pkrToPaisa } from "@/lib/format/currency";
 export async function createFinancialAccountAction(formData: FormData) {
   const ctx = await getAuthenticatedShopContext();
   if (!ctx || !ctx.businessId) redirect("/login");
+  assertAuthorizedRole(ctx.role, ["OWNER"], "manage shop finances");
 
   const accountName = (formData.get("accountName") as string)?.trim();
   const accountType = (formData.get("accountType") as string) || "CASH";
@@ -37,6 +39,7 @@ export async function createFinancialAccountAction(formData: FormData) {
 export async function recordOwnerContributionAction(formData: FormData) {
   const ctx = await getAuthenticatedShopContext();
   if (!ctx || !ctx.businessId) redirect("/login");
+  assertAuthorizedRole(ctx.role, ["OWNER"], "manage shop finances");
 
   const ownerName = (formData.get("ownerName") as string)?.trim();
   const contributionType = (formData.get("contributionType") as string) || "CASH";
@@ -57,7 +60,7 @@ export async function recordOwnerContributionAction(formData: FormData) {
     amount_paisa: amountPaisa,
     receiving_account_id: receivingAccountId || null,
     notes: notes,
-    recorded_by: (ctx as any).userId || null,
+    recorded_by: ctx.userId || null,
   });
 
   if (error) throw new Error(`Failed to record contribution: ${error.message}`);
@@ -68,6 +71,7 @@ export async function recordOwnerContributionAction(formData: FormData) {
 export async function recordOwnerDrawingAction(formData: FormData) {
   const ctx = await getAuthenticatedShopContext();
   if (!ctx || !ctx.businessId) redirect("/login");
+  assertAuthorizedRole(ctx.role, ["OWNER"], "manage shop finances");
 
   const ownerName = (formData.get("ownerName") as string)?.trim();
   const category = (formData.get("category") as string) || "HOUSEHOLD_EXPENSE";
@@ -88,7 +92,7 @@ export async function recordOwnerDrawingAction(formData: FormData) {
     amount_paisa: amountPaisa,
     source_account_id: sourceAccountId || null,
     purpose: purpose,
-    recorded_by: (ctx as any).userId || null,
+    recorded_by: ctx.userId || null,
   });
 
   if (error) throw new Error(`Failed to record drawing: ${error.message}`);
@@ -99,6 +103,7 @@ export async function recordOwnerDrawingAction(formData: FormData) {
 export async function createAccountTransferAction(formData: FormData) {
   const ctx = await getAuthenticatedShopContext();
   if (!ctx || !ctx.businessId) redirect("/login");
+  assertAuthorizedRole(ctx.role, ["OWNER"], "manage shop finances");
 
   const sourceAccountId = formData.get("sourceAccountId") as string;
   const destinationAccountId = formData.get("destinationAccountId") as string;
@@ -121,7 +126,7 @@ export async function createAccountTransferAction(formData: FormData) {
     amount_paisa: amountPaisa,
     reference_number: referenceNumber,
     description: description,
-    recorded_by: (ctx as any).userId || null,
+    recorded_by: ctx.userId || null,
   });
 
   if (error) throw new Error(`Failed to execute transfer: ${error.message}`);

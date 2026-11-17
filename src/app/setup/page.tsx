@@ -1,4 +1,4 @@
-﻿import { redirect } from "next/navigation";
+import { redirect } from "next/navigation";
 import { Building2, CheckCircle2, Cpu, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -26,17 +26,17 @@ export default async function SetupPage() {
   }
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center px-4 py-12">
+    <div className="tw-ambient-canvas flex min-h-screen flex-col items-center justify-center px-3.5 sm:px-4 py-8 sm:py-12 tw-page-in">
       <div className="w-full max-w-xl space-y-6">
         <div className="flex flex-col items-center text-center">
-          <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-[#FF7B1C] to-[#E65300] text-white shadow-md">
+          <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-[#FF8533] to-[#E05800] text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.35),0_10px_28px_-4px_rgba(255,106,0,0.45)] transition-transform duration-300 hover:scale-105">
             <Cpu className="h-7 w-7" />
           </div>
-          <h1 className="font-display mt-4 text-2xl sm:text-3xl font-extrabold text-ink">
+          <h1 className="font-display mt-4 text-2xl sm:text-3xl font-extrabold tracking-[-0.025em] text-[var(--foreground)]">
             Initialize TechnoWorld OS
           </h1>
-          <p className="mt-1.5 text-sm text-muted">
-            Signed in as <span className="font-semibold text-ink">{ctx.email}</span> • One-time shop workspace setup
+          <p className="mt-1.5 text-xs sm:text-sm text-[var(--foreground-secondary)] break-words">
+            Signed in as <span className="font-semibold text-[var(--foreground)] break-all sm:break-normal">{ctx.email}</span> • One-time shop workspace setup
           </p>
         </div>
 
@@ -81,30 +81,30 @@ export default async function SetupPage() {
                 />
               </div>
 
-              <div className="rounded-xl border border-brand/20 bg-warm p-4 space-y-2 text-xs text-ink">
+              <div className="rounded-xl border border-brand/20 bg-warm p-3.5 sm:p-4 space-y-2 text-xs text-ink">
                 <p className="font-bold text-brand-dark flex items-center gap-1.5">
-                  <ShieldCheck className="h-4 w-4" />
+                  <ShieldCheck className="h-4 w-4 shrink-0" />
                   Automatically Configured on Setup:
                 </p>
-                <ul className="space-y-1 text-muted">
-                  <li className="flex items-center gap-2">
-                    <CheckCircle2 className="h-3.5 w-3.5 text-success shrink-0" />
-                    Roles: OWNER, MANAGER &amp; EMPLOYEE with database Row Level Security
+                <ul className="space-y-1.5 text-muted">
+                  <li className="flex items-start sm:items-center gap-2">
+                    <CheckCircle2 className="h-3.5 w-3.5 text-success shrink-0 mt-0.5 sm:mt-0" />
+                    <span>Roles: OWNER, MANAGER &amp; EMPLOYEE with database Row Level Security</span>
                   </li>
-                  <li className="flex items-center gap-2">
-                    <CheckCircle2 className="h-3.5 w-3.5 text-success shrink-0" />
-                    3 Shop Terminals: PC-01 (Main Counter + 80mm Printer), PC-02, PC-03
+                  <li className="flex items-start sm:items-center gap-2">
+                    <CheckCircle2 className="h-3.5 w-3.5 text-success shrink-0 mt-0.5 sm:mt-0" />
+                    <span>3 Shop Terminals: PC-01 (Main Counter + 80mm Printer), PC-02, PC-03</span>
                   </li>
-                  <li className="flex items-center gap-2">
-                    <CheckCircle2 className="h-3.5 w-3.5 text-success shrink-0" />
-                    Shift Schedule: Morning (08:00–16:00) &amp; Evening (16:00–00:00) PKT
+                  <li className="flex items-start sm:items-center gap-2">
+                    <CheckCircle2 className="h-3.5 w-3.5 text-success shrink-0 mt-0.5 sm:mt-0" />
+                    <span>Shift Schedule: Morning (08:00–16:00) &amp; Evening (16:00–00:00) PKT</span>
                   </li>
                 </ul>
               </div>
 
-              <Button type="submit" size="lg" className="w-full">
-                <Building2 className="h-4.5 w-4.5" />
-                Complete Shop Setup &amp; Enter Dashboard
+              <Button type="submit" size="lg" className="w-full h-auto min-h-12 py-2.5 px-4 sm:px-6 text-xs sm:text-base text-center">
+                <Building2 className="h-4.5 w-4.5 shrink-0" />
+                <span>Complete Shop Setup &amp; Enter Dashboard</span>
               </Button>
             </form>
 
