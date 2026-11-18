@@ -3,8 +3,9 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
+    "postinstall": "bun scripts/pg-manager.mjs --setup-only",
     "dev": "next dev",
-    "build": "next build",
+    "build": "bun scripts/pg-manager.mjs --setup-only && next build",
     "start": "bun scripts/start.mjs",
     "lint": "eslint .",
     "db:migrate": "bun scripts/migrate.mjs",

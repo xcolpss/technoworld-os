@@ -15,7 +15,9 @@
 # Local PostgreSQL persistent cluster & backups
 /.postgres-data/
 /.postgres-backups/
+/.postgres-data.log
 *.postgres.log
+/.postgres-initpw-*.tmp
 
 # Misc & OS
 .DS_Store

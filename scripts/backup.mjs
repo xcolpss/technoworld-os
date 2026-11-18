@@ -5,6 +5,22 @@ import { ensurePostgresRunning, getDbConfig } from "./pg-manager.mjs";
 
 const { Client } = pg;
 
+function safeCloseClient(client) {
+  try {
+    if (client) {
+      client._ending = true;
+      if (client.connection) {
+        client.connection._ending = true;
+        if (client.connection.stream) {
+          client.connection.stream.destroy();
+        }
+      }
+    }
+  } catch {
+    // ignore
+  }
+}
+
 export async function createDatabaseBackup(projectRoot = process.cwd(), { autoOnly = false } = {}) {
   const cfg = getDbConfig(projectRoot);
   fs.mkdirSync(cfg.backupDir, { recursive: true });
@@ -23,7 +39,9 @@ export async function createDatabaseBackup(projectRoot = process.cwd(), { autoOn
     database: cfg.database,
     user: cfg.user,
     password: cfg.password,
+    connectionTimeoutMillis: 5000,
   });
+  client.on("error", () => {});
 
   await client.connect();
   try {
@@ -62,12 +80,16 @@ export async function createDatabaseBackup(projectRoot = process.cwd(), { autoOn
     console.log(`[backup] Saved local database backup: ${outPath}`);
     return outPath;
   } finally {
-    await client.end();
+    safeCloseClient(client);
   }
 }
 
-if (process.argv[1]?.endsWith("backup.mjs")) {
+const invokedScript = (process.argv[1] || "").replace(/\\/g, "/");
+if (invokedScript.endsWith("/backup.mjs") || invokedScript === "backup.mjs") {
   const pgHandle = await ensurePostgresRunning();
-  await createDatabaseBackup(process.cwd());
-  await pgHandle.stop();
+  try {
+    await createDatabaseBackup(process.cwd());
+  } finally {
+    await pgHandle.stop();
+  }
 }

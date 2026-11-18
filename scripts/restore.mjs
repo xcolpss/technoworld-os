@@ -5,6 +5,22 @@ import { ensurePostgresRunning, getDbConfig } from "./pg-manager.mjs";
 
 const { Client } = pg;
 
+function safeCloseClient(client) {
+  try {
+    if (client) {
+      client._ending = true;
+      if (client.connection) {
+        client.connection._ending = true;
+        if (client.connection.stream) {
+          client.connection.stream.destroy();
+        }
+      }
+    }
+  } catch {
+    // ignore
+  }
+}
+
 export async function restoreDatabaseBackup(backupFileArg, projectRoot = process.cwd()) {
   const cfg = getDbConfig(projectRoot);
   if (!fs.existsSync(cfg.backupDir)) {
@@ -33,7 +49,9 @@ export async function restoreDatabaseBackup(backupFileArg, projectRoot = process
     database: cfg.database,
     user: cfg.user,
     password: cfg.password,
+    connectionTimeoutMillis: 5000,
   });
+  client.on("error", () => {});
 
   await client.connect();
   try {
@@ -72,11 +90,12 @@ export async function restoreDatabaseBackup(backupFileArg, projectRoot = process
     await client.query("ROLLBACK");
     throw err;
   } finally {
-    await client.end();
+    safeCloseClient(client);
   }
 }
 
-if (process.argv[1]?.endsWith("restore.mjs")) {
+const invokedScript = (process.argv[1] || "").replace(/\\/g, "/");
+if (invokedScript.endsWith("/restore.mjs") || invokedScript === "restore.mjs") {
   const pgHandle = await ensurePostgresRunning();
   try {
     await restoreDatabaseBackup(process.argv[2]);

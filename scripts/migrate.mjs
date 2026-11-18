@@ -12,6 +12,22 @@ export function hashPasswordLocal(password) {
   return `scrypt:${salt}:${derived}`;
 }
 
+function safeCloseClient(client) {
+  try {
+    if (client) {
+      client._ending = true;
+      if (client.connection) {
+        client.connection._ending = true;
+        if (client.connection.stream) {
+          client.connection.stream.destroy();
+        }
+      }
+    }
+  } catch {
+    // ignore
+  }
+}
+
 export async function runMigrationsAndSeed(projectRoot = process.cwd()) {
   const cfg = getDbConfig(projectRoot);
   const client = new Client({
@@ -20,7 +36,9 @@ export async function runMigrationsAndSeed(projectRoot = process.cwd()) {
     database: cfg.database,
     user: cfg.user,
     password: cfg.password,
+    connectionTimeoutMillis: 5000,
   });
+  client.on("error", () => {});
 
   await client.connect();
 
@@ -33,50 +51,54 @@ export async function runMigrationsAndSeed(projectRoot = process.cwd()) {
     `);
 
     const migrationsDir = path.join(projectRoot, "db", "migrations");
-    const files = fs
-      .readdirSync(migrationsDir)
-      .filter((f) => f.endsWith(".sql"))
-      .sort();
+    if (fs.existsSync(migrationsDir)) {
+      const files = fs
+        .readdirSync(migrationsDir)
+        .filter((f) => f.endsWith(".sql"))
+        .sort();
 
-    for (const file of files) {
-      const already = await client.query(
-        "SELECT 1 FROM public.schema_migrations WHERE filename = $1",
-        [file]
+      const { rows: appliedRows } = await client.query(
+        "SELECT filename FROM public.schema_migrations"
       );
-      if (already.rowCount && already.rowCount > 0) continue;
+      const appliedSet = new Set(appliedRows.map((r) => r.filename));
 
-      console.log(`[migrate] Applying migration ${file}...`);
-      const sql = fs
-        .readFileSync(path.join(migrationsDir, file), "utf8")
-        .replace(/\uFEFF/g, "");
-      await client.query("BEGIN");
-      try {
-        await client.query(sql);
-        await client.query(
-          "INSERT INTO public.schema_migrations (filename) VALUES ($1)",
-          [file]
-        );
-        await client.query("COMMIT");
-      } catch (err) {
-        await client.query("ROLLBACK");
-        throw new Error(`Migration ${file} failed: ${err.message}`);
+      for (const file of files) {
+        if (appliedSet.has(file)) continue;
+
+        console.log(`[migrate] Applying migration ${file}...`);
+        const sql = fs
+          .readFileSync(path.join(migrationsDir, file), "utf8")
+          .replace(/\uFEFF/g, "");
+        await client.query("BEGIN");
+        try {
+          await client.query(sql);
+          await client.query(
+            "INSERT INTO public.schema_migrations (filename) VALUES ($1)",
+            [file]
+          );
+          await client.query("COMMIT");
+        } catch (err) {
+          await client.query("ROLLBACK");
+          throw new Error(`Migration ${file} failed: ${err.message}`);
+        }
       }
     }
 
-    // One-time import from Supabase dump if businesses table is empty
+    // One-time import from snapshot if businesses table is empty
     const snapshotPath = path.join(projectRoot, "db", "supabase-snapshot.json");
     if (fs.existsSync(snapshotPath)) {
       const { rows: bizCountRows } = await client.query(
         "SELECT COUNT(*)::int AS cnt FROM public.businesses"
       );
       if ((bizCountRows[0]?.cnt ?? 0) === 0) {
-        console.log("[migrate] Importing existing Supabase snapshot into local PostgreSQL...");
+        console.log("[migrate] Importing initial snapshot into local PostgreSQL...");
         const dump = JSON.parse(fs.readFileSync(snapshotPath, "utf8"));
-        const defaultPw = process.env.LOCAL_IMPORT_DEFAULT_PASSWORD || "ChangeMe123!";
+        const defaultPw =
+          process.env.LOCAL_IMPORT_DEFAULT_PASSWORD || "pakistan123";
+        const fallbackHash = hashPasswordLocal(defaultPw);
 
         await client.query("BEGIN");
         try {
-          // Inspect existing columns per table cleanly so snapshot import adapts safely
           const { rows: colRows } = await client.query(`
             SELECT table_name, column_name, data_type
             FROM information_schema.columns
@@ -99,10 +121,11 @@ export async function runMigrationsAndSeed(projectRoot = process.cwd()) {
           for (const u of dump.authUsers || []) {
             const prof = profileMap.get(u.id);
             const fullName =
+              u.full_name ||
               prof?.full_name ||
               u.user_metadata?.full_name ||
               (u.email ? u.email.split("@")[0] : "User");
-            const hash = hashPasswordLocal(defaultPw);
+            const hash = u.password_hash || fallbackHash;
 
             await client.query(
               `INSERT INTO public.auth_users (id, email, password_hash, full_name, phone, email_confirmed_at, created_at, updated_at)
@@ -232,14 +255,18 @@ export async function runMigrationsAndSeed(projectRoot = process.cwd()) {
       }
     }
   } finally {
-    await client.end();
+    safeCloseClient(client);
   }
 }
 
 // Allow direct CLI execution (`bun scripts/migrate.mjs`)
-if (process.argv[1]?.endsWith("migrate.mjs")) {
+const invokedScript = (process.argv[1] || "").replace(/\\/g, "/");
+if (invokedScript.endsWith("/migrate.mjs") || invokedScript === "migrate.mjs") {
   const { ensurePostgresRunning } = await import("./pg-manager.mjs");
   const pgHandle = await ensurePostgresRunning();
-  await runMigrationsAndSeed();
-  await pgHandle.stop();
+  try {
+    await runMigrationsAndSeed();
+  } finally {
+    await pgHandle.stop();
+  }
 }
