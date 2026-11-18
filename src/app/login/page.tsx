@@ -24,29 +24,38 @@ import {
 import { Input, Label } from "@/components/ui/input";
 import { StatusAlert } from "@/components/ui/states";
 import {
-  applyPersistenceToExistingAuthCookies,
-  createSupabaseBrowserClient,
-  getBrowserPersistenceMode,
-  isSupabaseConfigured,
-  setBrowserPersistenceMode,
-} from "@/lib/supabase/client";
-import type { PersistenceMode } from "@/lib/supabase/cookie-persistence";
+  PERSISTENCE_COOKIE_NAME,
+  parsePersistenceMode,
+} from "@/lib/auth/cookie-persistence";
 
 const TERMINAL_STORAGE_KEY = "technoworld_terminal_code";
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 function sanitizeNextPath(rawNext: string | null): string {
   if (!rawNext) return "/dashboard";
-  if (!rawNext.startsWith("/") || rawNext.startsWith("//") || rawNext.startsWith("/login")) {
+  if (
+    !rawNext.startsWith("/") ||
+    rawNext.startsWith("//") ||
+    rawNext.startsWith("/login")
+  ) {
     return "/dashboard";
   }
   return rawNext;
 }
 
+function readPersistenceFromDocument(): "persistent" | "session" {
+  if (typeof document === "undefined") return "persistent";
+  const match = document.cookie
+    .split(";")
+    .map((p) => p.trim())
+    .find((p) => p.startsWith(`${PERSISTENCE_COOKIE_NAME}=`));
+  const val = match ? decodeURIComponent(match.split("=")[1] || "") : null;
+  return parsePersistenceMode(val);
+}
+
 function LoginContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const supabaseReady = isSupabaseConfigured();
 
   const [checkingSession, setCheckingSession] = React.useState(true);
   const [mode, setMode] = React.useState<"SIGN_IN" | "SIGN_UP">("SIGN_IN");
@@ -74,7 +83,7 @@ function LoginContent() {
       if (savedTerminal) {
         setTerminalCode(savedTerminal);
       }
-      setRememberDevice(getBrowserPersistenceMode() === "persistent");
+      setRememberDevice(readPersistenceFromDocument() === "persistent");
 
       const reason = searchParams.get("reason");
       if (reason === "expired") {
@@ -83,22 +92,18 @@ function LoginContent() {
         setSuccessMsg("You have been signed out securely.");
       }
 
-      if (!supabaseReady) {
-        if (active) setCheckingSession(false);
-        return;
-      }
       try {
-        const supabase = createSupabaseBrowserClient();
-        const {
-          data: { user },
-        } = await supabase.auth.getUser();
-        if (user && active) {
+        const res = await fetch("/api/auth/session", {
+          credentials: "same-origin",
+          cache: "no-store",
+        });
+        if (res.ok && active) {
           router.replace(nextPath);
           router.refresh();
           return;
         }
       } catch {
-        // Not signed in; proceed to login form
+        // Proceed to login form
       } finally {
         if (active) setCheckingSession(false);
       }
@@ -109,37 +114,12 @@ function LoginContent() {
     return () => {
       active = false;
     };
-  }, [nextPath, router, searchParams, supabaseReady]);
-
-  const applyPersistenceStrategy = async (remember: boolean) => {
-    const persistenceMode: PersistenceMode = remember ? "persistent" : "session";
-    window.localStorage.setItem(TERMINAL_STORAGE_KEY, terminalCode);
-    setBrowserPersistenceMode(persistenceMode);
-    applyPersistenceToExistingAuthCookies(persistenceMode);
-
-    try {
-      await fetch("/api/auth/persistence", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rememberDevice: remember }),
-        credentials: "same-origin",
-      });
-    } catch {
-      // Browser cookie fallback already applied above
-    }
-  };
+  }, [nextPath, router, searchParams]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg(null);
     setSuccessMsg(null);
-
-    if (!supabaseReady) {
-      setErrorMsg(
-        "Supabase credentials are missing in .env.local. Configure them first."
-      );
-      return;
-    }
 
     const trimmedEmail = email.trim().toLowerCase();
     if (!EMAIL_REGEX.test(trimmedEmail)) {
@@ -147,8 +127,13 @@ function LoginContent() {
       return;
     }
 
-    if (password.length < 6) {
-      setErrorMsg("Password must be at least 6 characters long.");
+    if (mode === "SIGN_UP") {
+      if (password.length < 6) {
+        setErrorMsg("Password must be at least 6 characters long.");
+        return;
+      }
+    } else if (!password) {
+      setErrorMsg("Please enter your password.");
       return;
     }
 
@@ -159,59 +144,32 @@ function LoginContent() {
 
     setLoading(true);
     try {
-      // Set persistence cookie BEFORE sign-in so Supabase SSR cookie writes follow it immediately
-      await applyPersistenceStrategy(rememberDevice);
-
-      const supabase = createSupabaseBrowserClient();
-
-      if (mode === "SIGN_IN") {
-        const { error } = await supabase.auth.signInWithPassword({
+      window.localStorage.setItem(TERMINAL_STORAGE_KEY, terminalCode);
+      const endpoint = mode === "SIGN_IN" ? "/api/auth/login" : "/api/auth/signup";
+      const res = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({
+          fullName: fullName.trim(),
           email: trimmedEmail,
           password,
-        });
-        if (error) {
-          const msg = error.message.toLowerCase();
-          if (msg.includes("email not confirmed")) {
-            setErrorMsg(
-              "Your email is not confirmed yet. Open Supabase -> Authentication -> Users and confirm your user (or click the link sent to your email)."
-            );
-          } else if (msg.includes("invalid login credentials")) {
-            setErrorMsg("Invalid email or password. Please check your credentials and try again.");
-          } else {
-            setErrorMsg(error.message);
-          }
-          return;
-        }
+          rememberDevice,
+        }),
+      });
 
-        // Re-apply cookie lifetimes synchronously after sign-in completes
-        await applyPersistenceStrategy(rememberDevice);
-        router.replace(nextPath);
-        router.refresh();
-      } else {
-        const { data, error } = await supabase.auth.signUp({
-          email: trimmedEmail,
-          password,
-          options: {
-            data: {
-              full_name: fullName.trim() || trimmedEmail.split("@")[0],
-            },
-          },
-        });
-        if (error) {
-          setErrorMsg(error.message);
-          return;
-        }
-        if (data.session) {
-          await applyPersistenceStrategy(rememberDevice);
-          router.replace("/setup");
-          router.refresh();
-        } else {
-          setSuccessMsg(
-            "Account created! Confirm your email in your inbox (or in Supabase -> Authentication -> Users), then sign in."
-          );
-          setMode("SIGN_IN");
-        }
+      const payload = (await res.json().catch(() => ({}))) as {
+        ok?: boolean;
+        error?: string;
+      };
+
+      if (!res.ok || !payload.ok) {
+        setErrorMsg(payload.error || "Authentication failed.");
+        return;
       }
+
+      router.replace(mode === "SIGN_IN" ? nextPath : "/setup");
+      router.refresh();
     } catch (err) {
       setErrorMsg(
         err instanceof Error ? err.message : "Authentication request failed."
@@ -245,7 +203,7 @@ function LoginContent() {
             TechnoWorld OS
           </h1>
           <p className="mt-1 text-xs sm:text-sm text-[var(--foreground-secondary)]">
-            Owner &amp; Staff Portal • Rawalpindi, Pakistan
+            Local PostgreSQL Edition • Rawalpindi, Pakistan
           </p>
         </div>
 
@@ -273,8 +231,8 @@ function LoginContent() {
             </div>
             <CardDescription>
               {mode === "SIGN_IN"
-                ? "Enter your registered email and password to access the workspace."
-                : "Register the initial shop owner account to initialize TechnoWorld."}
+                ? "Enter your registered email and password to access the local workspace."
+                : "Register a local shop owner account to initialize TechnoWorld."}
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -357,7 +315,6 @@ function LoginContent() {
                 </div>
               </div>
 
-              {/* Shop Terminal Assignment */}
               <div>
                 <Label htmlFor="terminalCode">
                   <span className="inline-flex items-center gap-1.5">
@@ -384,7 +341,6 @@ function LoginContent() {
                 </select>
               </div>
 
-              {/* Remember This Device */}
               <label className="flex items-start gap-2.5 rounded-xl border border-[var(--border)] bg-[var(--surface-muted)]/70 px-3.5 py-2.5 text-xs text-[var(--foreground)] cursor-pointer select-none transition-colors hover:border-[var(--primary)]/40">
                 <input
                   type="checkbox"
@@ -396,7 +352,7 @@ function LoginContent() {
                   <span className="block font-semibold">Remember This Device</span>
                   <span className="block text-[11px] text-[var(--muted-foreground)]">
                     {rememberDevice
-                      ? "Keep me signed in across browser restarts on this trusted device."
+                      ? "Keep me signed in across browser restarts on this local machine."
                       : "Session-only login: closes automatically when you close your browser."}
                   </span>
                 </span>
@@ -425,11 +381,11 @@ function LoginContent() {
             <div className="mt-4 flex items-center justify-between border-t border-[var(--border)]/70 pt-3 text-[11px] text-[var(--muted-foreground)]">
               <span className="inline-flex items-center gap-1">
                 <ShieldCheck className="h-3.5 w-3.5 text-emerald-500" />
-                Encrypted Supabase Auth
+                Local PostgreSQL Auth
               </span>
               <span className="inline-flex items-center gap-1">
                 <CheckCircle2 className="h-3.5 w-3.5 text-[var(--primary)]" />
-                Role-Verified Access
+                Zero Cloud Latency
               </span>
             </div>
           </CardContent>

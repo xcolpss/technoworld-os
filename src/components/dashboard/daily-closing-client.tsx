@@ -4,7 +4,9 @@ import * as React from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
+  AlertTriangle,
   ArrowLeft,
+  Ban,
   Calendar,
   CheckCircle2,
   Coins,
@@ -23,27 +25,55 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input, Label } from "@/components/ui/input";
 import { PageHeader } from "@/components/ui/page-header";
+import { SectionRefreshButton } from "@/components/ui/section-refresh-button";
 import { formatPkr, pkrToPaisa } from "@/lib/format/currency";
 import { downloadCsvFile, downloadXlsxWorkbook } from "@/lib/export/xlsx";
 import {
   loadClosingDataForDateAction,
   saveDailyClosingAction,
+  voidDailyClosingAction,
   type ClosingExpenseEntry,
   type ClosingHistorySummary,
+  type ClosingShiftLabel,
   type ClosingWageEntry,
   type DailyClosingRecord,
 } from "@/app/(workspace)/dashboard/closing/actions";
+import type { UserRole } from "@/types/system";
+
+const CLOSING_SHIFTS: { value: ClosingShiftLabel; label: string }[] = [
+  { value: "FULL_DAY", label: "Full Day" },
+  { value: "MORNING", label: "Morning Shift" },
+  { value: "EVENING", label: "Evening Shift" },
+  { value: "NIGHT", label: "Night Shift" },
+];
+
+const SHIFT_LABELS: Record<ClosingShiftLabel, string> = {
+  FULL_DAY: "Full Day",
+  MORNING: "Morning",
+  EVENING: "Evening",
+  NIGHT: "Night",
+};
 
 interface DailyClosingClientProps {
   initialRecord: DailyClosingRecord;
   initialHistory: ClosingHistorySummary[];
   businessName: string;
+  userRole?: UserRole;
+  onSavedClosing?: () => void | Promise<unknown>;
+  onForceRefresh?: () => void | Promise<unknown>;
+  isRefreshing?: boolean;
+  lastUpdatedAt?: number;
 }
 
 export function DailyClosingClient({
   initialRecord,
   initialHistory,
   businessName,
+  userRole = "OWNER",
+  onSavedClosing,
+  onForceRefresh,
+  isRefreshing = false,
+  lastUpdatedAt,
 }: DailyClosingClientProps) {
   const router = useRouter();
   const [record, setRecord] = React.useState<DailyClosingRecord>(initialRecord);
@@ -51,6 +81,9 @@ export function DailyClosingClient({
     React.useState<ClosingHistorySummary[]>(initialHistory);
 
   const [reportDate, setReportDate] = React.useState(initialRecord.closingDate);
+  const [shiftLabel, setShiftLabel] = React.useState<ClosingShiftLabel>(
+    initialRecord.shiftLabel ?? "FULL_DAY"
+  );
   const [morningCashPkr, setMorningCashPkr] = React.useState(
     String(Math.round(initialRecord.morningCashPaisa / 100))
   );
@@ -81,6 +114,14 @@ export function DailyClosingClient({
 
   const [isLoadingDate, setIsLoadingDate] = React.useState(false);
   const [isSaving, setIsSaving] = React.useState(false);
+  const [voidTarget, setVoidTarget] = React.useState<{
+    closingId?: string;
+    closingDate: string;
+    shiftLabel: ClosingShiftLabel;
+  } | null>(null);
+  const [voidReason, setVoidReason] = React.useState("");
+  const [isVoiding, setIsVoiding] = React.useState(false);
+  const canVoidClosing = userRole === "OWNER" || userRole === "MANAGER";
   const [toast, setToast] = React.useState<{
     type: "success" | "error";
     message: string;
@@ -91,6 +132,7 @@ export function DailyClosingClient({
       setRecord(next);
       setHistory(nextHistory);
       setReportDate(next.closingDate);
+      setShiftLabel(next.shiftLabel ?? "FULL_DAY");
       setMorningCashPkr(String(Math.round(next.morningCashPaisa / 100)));
       setEveningCashPkr(String(Math.round(next.eveningCashPaisa / 100)));
       setNightCashPkr(String(Math.round(next.nightCashPaisa / 100)));
@@ -107,12 +149,16 @@ export function DailyClosingClient({
     setTimeout(() => setToast(null), 4500);
   };
 
-  const handleDateChange = async (nextDate: string) => {
+  const handleLoadSelection = async (
+    nextDate: string,
+    nextShift: ClosingShiftLabel
+  ) => {
     if (!nextDate) return;
     setReportDate(nextDate);
+    setShiftLabel(nextShift);
     setIsLoadingDate(true);
     try {
-      const res = await loadClosingDataForDateAction(nextDate);
+      const res = await loadClosingDataForDateAction(nextDate, nextShift);
       syncFormFromRecord(res.record, res.history);
     } catch (err) {
       showToast(
@@ -122,6 +168,14 @@ export function DailyClosingClient({
     } finally {
       setIsLoadingDate(false);
     }
+  };
+
+  const handleDateChange = (nextDate: string) => {
+    void handleLoadSelection(nextDate, shiftLabel);
+  };
+
+  const handleShiftChange = (nextShift: ClosingShiftLabel) => {
+    void handleLoadSelection(reportDate, nextShift);
   };
 
   const morningCashPaisa = pkrToPaisa(morningCashPkr || "0");
@@ -143,11 +197,11 @@ export function DailyClosingClient({
   const expectedClosingPaisa = totalCashCountedInPaisa - totalOutflowsPaisa;
   const cashDifferencePaisa = actualClosingPaisa - expectedClosingPaisa;
 
-  // Monthly summary computed from persisted historical closings in current month
+  // Monthly summary computed from non-voided persisted historical closings in current month
   const currentMonthPrefix = reportDate.slice(0, 7);
   const monthlySummary = React.useMemo(() => {
-    const matching = history.filter((h) =>
-      h.closingDate.startsWith(currentMonthPrefix)
+    const matching = history.filter(
+      (h) => h.status !== "VOIDED" && h.closingDate.startsWith(currentMonthPrefix)
     );
     return matching.reduce(
       (acc, h) => ({
@@ -226,11 +280,50 @@ export function DailyClosingClient({
     setWages((prev) => prev.filter((w) => w.id !== id));
   };
 
+  const handleConfirmVoidClosing = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!voidTarget) return;
+    setIsVoiding(true);
+    try {
+      const updated = await voidDailyClosingAction({
+        closingId: voidTarget.closingId,
+        closingDate: voidTarget.closingDate,
+        shiftLabel: voidTarget.shiftLabel,
+        reason: voidReason,
+      });
+      if (
+        updated.record.closingDate === reportDate &&
+        updated.record.shiftLabel === shiftLabel
+      ) {
+        syncFormFromRecord(updated.record, updated.history);
+      } else {
+        setHistory(updated.history);
+      }
+      showToast(
+        "success",
+        `Daily closing for ${voidTarget.closingDate} (${SHIFT_LABELS[voidTarget.shiftLabel]}) marked VOIDED. You can now save a replacement closing.`
+      );
+      setVoidTarget(null);
+      setVoidReason("");
+      if (onSavedClosing) await onSavedClosing();
+      else router.refresh();
+    } catch (err) {
+      showToast(
+        "error",
+        err instanceof Error ? err.message : "Failed to void daily closing."
+      );
+    } finally {
+      setIsVoiding(false);
+    }
+  };
+
   const handleSaveClosing = async () => {
     setIsSaving(true);
     try {
       const saved = await saveDailyClosingAction({
         closingDate: reportDate,
+        shiftLabel,
+        replacesClosingId: record.replacesClosingId ?? null,
         morningCashPaisa,
         eveningCashPaisa,
         nightCashPaisa,
@@ -242,9 +335,12 @@ export function DailyClosingClient({
       syncFormFromRecord(saved.record, saved.history);
       showToast(
         "success",
-        `Daily closing for ${reportDate} saved permanently to Supabase!`
+        record.replacesClosingId
+          ? `Replacement daily closing for ${reportDate} (${SHIFT_LABELS[shiftLabel]}) saved! Original voided record remains preserved.`
+          : `Daily closing for ${reportDate} (${SHIFT_LABELS[shiftLabel]}) saved permanently to Local PostgreSQL!`
       );
-      router.refresh();
+      if (onSavedClosing) await onSavedClosing();
+      else router.refresh();
     } catch (err) {
       showToast(
         "error",
@@ -355,14 +451,32 @@ export function DailyClosingClient({
         >
           <ArrowLeft className="h-4 w-4" /> Back to Executive BI Dashboard
         </Link>
-        <Badge
-          variant={record.status === "SAVED" ? "success" : "warning"}
-          className="font-mono text-xs px-3 py-1"
-        >
-          {record.status === "SAVED"
-            ? `Saved in Database (${reportDate})`
-            : `Live Draft (${reportDate})`}
-        </Badge>
+        <div className="flex flex-wrap items-center gap-2">
+          <Link
+            href="/sales"
+            className="text-xs font-bold text-[var(--primary)] hover:underline"
+          >
+            View in Sales History
+          </Link>
+          <Badge
+            variant={
+              record.status === "VOIDED"
+                ? "danger"
+                : record.status === "SAVED"
+                ? "success"
+                : "warning"
+            }
+            className="font-mono text-xs px-3 py-1"
+          >
+            {record.status === "VOIDED"
+              ? `VOIDED (${reportDate} • ${SHIFT_LABELS[shiftLabel]})`
+              : record.status === "SAVED"
+              ? `Saved in Database (${reportDate} • ${SHIFT_LABELS[shiftLabel]})`
+              : record.replacedVoided
+              ? `Replacement Draft (${reportDate} • ${SHIFT_LABELS[shiftLabel]})`
+              : `Live Draft (${reportDate} • ${SHIFT_LABELS[shiftLabel]})`}
+          </Badge>
+        </div>
       </div>
 
       <PageHeader
@@ -371,6 +485,13 @@ export function DailyClosingClient({
         description="Auto-populated from live POS sales, digital collections, and shop expenses. Record shift cash counts, daily staff wages, save historical closings, and export."
         actions={
           <div className="print:hidden flex flex-wrap items-center gap-2">
+            {onForceRefresh && (
+              <SectionRefreshButton
+                onRefresh={onForceRefresh}
+                isFetching={isRefreshing}
+                lastUpdatedAt={lastUpdatedAt}
+              />
+            )}
             <Button
               type="button"
               variant="secondary"
@@ -398,17 +519,84 @@ export function DailyClosingClient({
             >
               <Printer className="h-3.5 w-3.5" /> Printable PDF
             </Button>
+            {canVoidClosing && record.status === "SAVED" && (
+              <Button
+                type="button"
+                variant="danger"
+                size="sm"
+                onClick={() => {
+                  setVoidTarget({
+                    closingId: record.id ?? undefined,
+                    closingDate: reportDate,
+                    shiftLabel,
+                  });
+                  setVoidReason("");
+                }}
+                className="gap-1.5"
+              >
+                <Ban className="h-3.5 w-3.5" /> Void Entry
+              </Button>
+            )}
             <Button
               type="button"
               loading={isSaving}
               onClick={handleSaveClosing}
               className="gap-1.5"
             >
-              <Save className="h-3.5 w-3.5" /> Save Daily Closing
+              <Save className="h-3.5 w-3.5" />{" "}
+              {record.replacedVoided && record.status === "DRAFT"
+                ? "Save Replacement Closing"
+                : "Save Daily Closing"}
             </Button>
           </div>
         }
       />
+
+      {record.status === "DRAFT" && record.replacedVoided && (
+        <Card className="border-amber-500/40 bg-amber-500/10">
+          <CardContent className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+            <div className="flex items-start gap-2.5 text-amber-500 font-bold">
+              <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
+              <div>
+                <p>
+                  Creating replacement closing for {reportDate} ({SHIFT_LABELS[shiftLabel]}). Previous closing was VOIDED and remains preserved in audit &amp; Sales History.
+                </p>
+                <p className="font-normal text-[11px] opacity-90 mt-0.5">
+                  Void Reason: {record.replacedVoided.voidReason || "Correction required"}
+                  {record.replacedVoided.voidedByName
+                    ? ` • Voided by ${record.replacedVoided.voidedByName}`
+                    : ""}
+                </p>
+              </div>
+            </div>
+            <Badge variant="warning" className="font-mono shrink-0">
+              REPLACEMENT READY
+            </Badge>
+          </CardContent>
+        </Card>
+      )}
+
+      {record.status === "VOIDED" && (
+        <Card className="border-rose-500/40 bg-rose-500/10">
+          <CardContent className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+            <div className="flex items-start gap-2.5 text-rose-500 font-bold">
+              <Ban className="h-4 w-4 shrink-0 mt-0.5" />
+              <div>
+                <p>
+                  This Daily Closing entry ({reportDate}) is VOIDED and excluded from all totals, monthly summaries, and Profit &amp; Loss reports.
+                </p>
+                <p className="font-normal text-[11px] opacity-90 mt-0.5">
+                  Reason: {record.voidReason || "Accidental entry"}
+                  {record.voidedByName ? ` • Voided by ${record.voidedByName}` : ""}
+                </p>
+              </div>
+            </div>
+            <Badge variant="danger" className="font-mono shrink-0">
+              AUDIT PRESERVED
+            </Badge>
+          </CardContent>
+        </Card>
+      )}
 
       {toast && (
         <Card
@@ -432,19 +620,36 @@ export function DailyClosingClient({
       {/* Live POS & Date Summary Bar */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-3.5">
         <Card>
-          <CardContent className="p-4 space-y-1.5">
+          <CardContent className="p-4 space-y-2">
             <Label htmlFor="closingDatePicker" className="flex items-center gap-1.5">
               <Calendar className="h-3.5 w-3.5 text-[var(--primary)]" />
-              Closing Date (PKT)
+              Closing Date &amp; Shift (PKT)
             </Label>
-            <Input
-              id="closingDatePicker"
-              type="date"
-              value={reportDate}
-              disabled={isLoadingDate}
-              onChange={(e) => handleDateChange(e.target.value)}
-              className="h-10 font-mono text-xs font-bold"
-            />
+            <div className="grid grid-cols-2 gap-2">
+              <Input
+                id="closingDatePicker"
+                type="date"
+                value={reportDate}
+                disabled={isLoadingDate}
+                onChange={(e) => handleDateChange(e.target.value)}
+                className="h-9 font-mono text-xs font-bold"
+              />
+              <select
+                aria-label="Closing Shift"
+                value={shiftLabel}
+                disabled={isLoadingDate}
+                onChange={(e) =>
+                  handleShiftChange(e.target.value as ClosingShiftLabel)
+                }
+                className="h-9 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 text-xs font-bold text-[var(--foreground)] focus:outline-none focus:ring-2 focus:ring-[var(--primary)]"
+              >
+                {CLOSING_SHIFTS.map((s) => (
+                  <option key={s.value} value={s.value}>
+                    {s.label}
+                  </option>
+                ))}
+              </select>
+            </div>
           </CardContent>
         </Card>
 
@@ -801,6 +1006,8 @@ export function DailyClosingClient({
                   <thead>
                     <tr className="border-b border-[var(--border)] bg-[var(--warm)]/60 text-[var(--muted)] uppercase">
                       <th className="py-2 px-3">Date</th>
+                      <th className="py-2 px-3">Shift</th>
+                      <th className="py-2 px-3">Status</th>
                       <th className="py-2 px-3 text-right">Net Sales</th>
                       <th className="py-2 px-3 text-right">Expenses</th>
                       <th className="py-2 px-3 text-right">Wages</th>
@@ -810,26 +1017,86 @@ export function DailyClosingClient({
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-[var(--border)]">
-                    {history.map((h) => (
-                      <tr key={h.closingDate} className="hover:bg-[var(--warm)]/40">
-                        <td className="py-2 px-3 font-mono font-bold">{h.closingDate}</td>
-                        <td className="py-2 px-3 text-right font-mono">{formatPkr(h.netSalesPaisa)}</td>
-                        <td className="py-2 px-3 text-right font-mono text-rose-500">{formatPkr(h.totalExpensesPaisa)}</td>
-                        <td className="py-2 px-3 text-right font-mono text-amber-500">{formatPkr(h.totalWagesPaisa)}</td>
-                        <td className="py-2 px-3 text-right font-mono font-bold">{formatPkr(h.actualClosingPaisa)}</td>
-                        <td className="py-2 px-3 text-right font-mono font-bold">{formatPkr(h.cashDifferencePaisa)}</td>
-                        <td className="py-2 px-3 text-right">
-                          <Button
-                            type="button"
-                            variant="secondary"
-                            size="sm"
-                            onClick={() => handleDateChange(h.closingDate)}
-                          >
-                            Load
-                          </Button>
-                        </td>
-                      </tr>
-                    ))}
+                    {history.map((h) => {
+                      const isVoided = h.status === "VOIDED";
+                      return (
+                        <tr
+                          key={h.id}
+                          className={
+                            isVoided
+                              ? "bg-rose-500/5 opacity-75"
+                              : "hover:bg-[var(--warm)]/40"
+                          }
+                        >
+                          <td className={`py-2 px-3 font-mono font-bold ${isVoided ? "line-through text-rose-500" : ""}`}>
+                            {h.closingDate}
+                          </td>
+                          <td className="py-2 px-3 text-xs font-semibold text-[var(--foreground-secondary)]">
+                            {SHIFT_LABELS[h.shiftLabel] ?? h.shiftLabel}
+                          </td>
+                          <td className="py-2 px-3">
+                            {isVoided ? (
+                              <Badge variant="danger" className="text-[10px]">
+                                VOIDED
+                              </Badge>
+                            ) : (
+                              <Badge variant="success" className="text-[10px]">
+                                ACTIVE
+                              </Badge>
+                            )}
+                          </td>
+                          <td className={`py-2 px-3 text-right font-mono ${isVoided ? "line-through text-[var(--muted)]" : ""}`}>
+                            {formatPkr(h.netSalesPaisa)}
+                          </td>
+                          <td className={`py-2 px-3 text-right font-mono text-rose-500 ${isVoided ? "line-through opacity-60" : ""}`}>
+                            {formatPkr(h.totalExpensesPaisa)}
+                          </td>
+                          <td className={`py-2 px-3 text-right font-mono text-amber-500 ${isVoided ? "line-through opacity-60" : ""}`}>
+                            {formatPkr(h.totalWagesPaisa)}
+                          </td>
+                          <td className={`py-2 px-3 text-right font-mono font-bold ${isVoided ? "line-through text-[var(--muted)]" : ""}`}>
+                            {formatPkr(h.actualClosingPaisa)}
+                          </td>
+                          <td className={`py-2 px-3 text-right font-mono font-bold ${isVoided ? "line-through text-[var(--muted)]" : ""}`}>
+                            {formatPkr(h.cashDifferencePaisa)}
+                          </td>
+                          <td className="py-2 px-3 text-right">
+                            <div className="inline-flex items-center gap-1.5">
+                              <Button
+                                type="button"
+                                variant="secondary"
+                                size="sm"
+                                onClick={() =>
+                                  void handleLoadSelection(
+                                    h.closingDate,
+                                    h.shiftLabel
+                                  )
+                                }
+                              >
+                                {isVoided ? "Replace" : "Load"}
+                              </Button>
+                              {canVoidClosing && !isVoided && (
+                                <Button
+                                  type="button"
+                                  variant="danger"
+                                  size="sm"
+                                  onClick={() => {
+                                    setVoidTarget({
+                                      closingId: h.id,
+                                      closingDate: h.closingDate,
+                                      shiftLabel: h.shiftLabel,
+                                    });
+                                    setVoidReason("");
+                                  }}
+                                >
+                                  <Ban className="h-3 w-3" /> Void
+                                </Button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -837,6 +1104,65 @@ export function DailyClosingClient({
           </CardContent>
         </Card>
       </div>
+
+      {/* Confirmation Modal for Voiding a Daily Closing Entry */}
+      {voidTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm tw-backdrop-in p-4">
+          <div className="glass-modal w-full max-w-md rounded-2xl p-5 sm:p-6 space-y-4">
+            <div className="flex items-start gap-3">
+              <div className="h-10 w-10 rounded-xl bg-rose-500/15 border border-rose-500/30 text-rose-500 flex items-center justify-center shrink-0">
+                <AlertTriangle className="h-5 w-5" />
+              </div>
+              <div>
+                <h3 className="font-display text-base font-extrabold text-[var(--foreground)]">
+                  Void Daily Closing ({voidTarget.closingDate} •{" "}
+                  {SHIFT_LABELS[voidTarget.shiftLabel]})?
+                </h3>
+                <p className="text-xs text-[var(--foreground-secondary)] mt-1">
+                  The original closing record will be preserved as <strong className="text-rose-500">VOIDED</strong> in audit logs and Sales History. POS sales, payments, inventory, and cash sessions will not be modified, and you can immediately save a replacement closing for this shift.
+                </p>
+              </div>
+            </div>
+
+            <form onSubmit={handleConfirmVoidClosing} className="space-y-3">
+              <div>
+                <Label htmlFor="voidClosingReason">Reason for Voiding</Label>
+                <Input
+                  id="voidClosingReason"
+                  value={voidReason}
+                  onChange={(e) => setVoidReason(e.target.value)}
+                  placeholder="e.g. Accidental duplicate submission or wrong cash count"
+                  className="mt-1 h-10 text-xs"
+                  required
+                />
+              </div>
+              <div className="flex flex-wrap justify-end gap-2 pt-2">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  disabled={isVoiding}
+                  onClick={() => {
+                    setVoidTarget(null);
+                    setVoidReason("");
+                  }}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="submit"
+                  variant="danger"
+                  size="sm"
+                  loading={isVoiding}
+                  className="gap-1.5"
+                >
+                  <Ban className="h-3.5 w-3.5" /> Confirm Void Entry
+                </Button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

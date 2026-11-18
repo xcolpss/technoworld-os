@@ -1,14 +1,16 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { PageHeader } from "@/components/ui/page-header";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Printer, Moon, Sun, Monitor, CheckCircle2, Store, Clock } from "lucide-react";
+import { Printer, Moon, Sun, Monitor, CheckCircle2, Store, Clock, KeyRound } from "lucide-react";
 
 export function SettingsClient({ businessName }: { businessName: string }) {
+  const queryClient = useQueryClient();
   const [themeMode, setThemeMode] = useState<"light" | "dark" | "system">("light");
   const [shopName, setShopName] = useState(businessName || "TechnoWorld OS • Rawalpindi");
   const [printerWidth, setPrinterWidth] = useState("80mm");
@@ -17,6 +19,45 @@ export function SettingsClient({ businessName }: { businessName: string }) {
   const [eveningShiftStart, setEveningShiftStart] = useState("16:00");
   const [eveningShiftEnd, setEveningShiftEnd] = useState("00:00");
   const [saved, setSaved] = useState(false);
+
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [pwLoading, setPwLoading] = useState(false);
+  const [pwMessage, setPwMessage] = useState<{ type: "ok" | "err"; text: string } | null>(null);
+
+  async function handleChangePassword() {
+    setPwMessage(null);
+    if (!currentPassword || newPassword.length < 6) {
+      setPwMessage({ type: "err", text: "New password must be at least 6 characters." });
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setPwMessage({ type: "err", text: "New passwords do not match." });
+      return;
+    }
+    setPwLoading(true);
+    try {
+      const res = await fetch("/api/auth/change-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ currentPassword, newPassword }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setPwMessage({ type: "err", text: data.error || "Failed to update password." });
+      } else {
+        setCurrentPassword("");
+        setNewPassword("");
+        setConfirmPassword("");
+        setPwMessage({ type: "ok", text: "Password updated in local PostgreSQL." });
+      }
+    } catch {
+      setPwMessage({ type: "err", text: "Unable to reach local server." });
+    } finally {
+      setPwLoading(false);
+    }
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -59,7 +100,7 @@ export function SettingsClient({ businessName }: { businessName: string }) {
     }
   };
 
-  const handleSave = (e: React.FormEvent) => {
+  const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     localStorage.setItem("tw_printer_width", printerWidth);
     localStorage.setItem("tw_morning_start", morningShiftStart);
@@ -67,9 +108,32 @@ export function SettingsClient({ businessName }: { businessName: string }) {
     localStorage.setItem("tw_evening_start", eveningShiftStart);
     localStorage.setItem("tw_evening_end", eveningShiftEnd);
 
+    try {
+      const res = await fetch("/api/workspace/shift-state", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          morningStart: morningShiftStart,
+          morningEnd: morningShiftEnd,
+          eveningStart: eveningShiftStart,
+          eveningEnd: eveningEndOrDefault(eveningShiftEnd),
+        }),
+      });
+      if (res.ok) {
+        const updated = await res.json();
+        queryClient.setQueryData(["workspace", "shift-state"], updated);
+      }
+    } catch {
+      // Keep local settings saved cleanly
+    }
+
     setSaved(true);
     setTimeout(() => setSaved(false), 3000);
   };
+
+  function eveningEndOrDefault(val: string): string {
+    return val || "00:00";
+  }
 
   return (
     <div className="space-y-6 pb-12 max-w-7xl mx-auto">
@@ -242,6 +306,68 @@ export function SettingsClient({ businessName }: { businessName: string }) {
           </Button>
         </div>
       </form>
+
+      <Card className="border-[var(--border)] bg-[var(--surface)] shadow-xs">
+        <CardContent className="p-4 sm:p-6 space-y-4">
+          <div className="flex items-center gap-2.5 border-b border-[var(--border)] pb-3">
+            <KeyRound className="h-5 w-5 text-[var(--primary)]" />
+            <div>
+              <h3 className="font-display text-base font-extrabold text-[var(--foreground)]">Local Account Password</h3>
+              <p className="text-[11px] font-medium text-[var(--muted)]">Update your local PostgreSQL login credentials</p>
+            </div>
+          </div>
+
+          {pwMessage && (
+            <div className={`rounded-xl px-3.5 py-2.5 text-xs font-bold border ${pwMessage.type === "ok" ? "bg-[var(--success)]/10 text-[var(--success)] border-[var(--success)]/20" : "bg-[var(--danger)]/10 text-[var(--danger)] border-[var(--danger)]/20"}`}>
+              {pwMessage.text}
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+            <div>
+              <Label>Current Password</Label>
+              <Input
+                type="password"
+                value={currentPassword}
+                onChange={(e) => setCurrentPassword(e.target.value)}
+                placeholder="Enter current password"
+                className="mt-1 h-10 bg-[var(--surface-secondary)] text-[var(--foreground)]"
+              />
+            </div>
+            <div>
+              <Label>New Password</Label>
+              <Input
+                type="password"
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+                placeholder="Minimum 6 characters"
+                className="mt-1 h-10 bg-[var(--surface-secondary)] text-[var(--foreground)]"
+              />
+            </div>
+            <div>
+              <Label>Confirm New Password</Label>
+              <Input
+                type="password"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                placeholder="Repeat new password"
+                className="mt-1 h-10 bg-[var(--surface-secondary)] text-[var(--foreground)]"
+              />
+            </div>
+          </div>
+
+          <div className="flex justify-end">
+            <Button
+              type="button"
+              disabled={pwLoading}
+              onClick={handleChangePassword}
+              className="w-full sm:w-auto px-6 font-bold bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white cursor-pointer"
+            >
+              {pwLoading ? "Updating..." : "Update Password"}
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
     </div>
   );
 }

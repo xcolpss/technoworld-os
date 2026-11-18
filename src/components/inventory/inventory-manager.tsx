@@ -4,12 +4,17 @@ import * as React from "react";
 import {
   AlertTriangle,
   Boxes,
+  Check,
+  ChevronDown,
   Edit,
+  Filter,
   FolderCog,
   Plus,
   Search,
   Trash2,
   TrendingUp,
+  Wallet,
+  X,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -60,7 +65,10 @@ export function InventoryManager({
   onDeleteItem,
 }: InventoryManagerProps) {
   const [search, setSearch] = React.useState("");
-  const [selectedCategory, setSelectedCategory] = React.useState("ALL");
+  const [selectedCategories, setSelectedCategories] = React.useState<string[]>([]);
+  const [categoryMenuOpen, setCategoryMenuOpen] = React.useState(false);
+  const [categorySearch, setCategorySearch] = React.useState("");
+  const categoryMenuRef = React.useRef<HTMLDivElement | null>(null);
 
   // Modals
   const [showProductModal, setShowProductModal] = React.useState(false);
@@ -85,10 +93,63 @@ export function InventoryManager({
   const [feedback, setFeedback] = React.useState<{ type: "ok" | "err"; text: string } | null>(null);
   const [isPending, startTransition] = React.useTransition();
 
-  const filterCategories = ["ALL", ...Array.from(new Set(categories.map((c) => c.name)))];
+  React.useEffect(() => {
+    if (!categoryMenuOpen) return;
+    const onOutside = (e: MouseEvent) => {
+      if (categoryMenuRef.current && !categoryMenuRef.current.contains(e.target as Node)) {
+        setCategoryMenuOpen(false);
+      }
+    };
+    const onEsc = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setCategoryMenuOpen(false);
+    };
+    window.addEventListener("mousedown", onOutside);
+    window.addEventListener("keydown", onEsc);
+    return () => {
+      window.removeEventListener("mousedown", onOutside);
+      window.removeEventListener("keydown", onEsc);
+    };
+  }, [categoryMenuOpen]);
+
+  const uniqueCategories = React.useMemo(() => {
+    const set = new Set<string>(categories.map((c) => c.name));
+    for (const i of items) {
+      if (i.category) set.add(i.category);
+    }
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [categories, items]);
+
+  const categoryItemCounts = React.useMemo(() => {
+    const map = new Map<string, number>();
+    for (const item of items) {
+      map.set(item.category, (map.get(item.category) ?? 0) + 1);
+    }
+    return map;
+  }, [items]);
+
+  const visibleDropdownCategories = React.useMemo(() => {
+    const q = categorySearch.trim().toLowerCase();
+    if (!q) return uniqueCategories;
+    return uniqueCategories.filter((c) => c.toLowerCase().includes(q));
+  }, [uniqueCategories, categorySearch]);
+
+  const toggleCategorySelection = (cat: string) => {
+    setSelectedCategories((prev) =>
+      prev.includes(cat) ? prev.filter((c) => c !== cat) : [...prev, cat]
+    );
+  };
+
+  const clearSelectedCategories = () => {
+    setSelectedCategories([]);
+  };
 
   const filteredItems = items.filter((item) => {
-    if (selectedCategory !== "ALL" && item.category !== selectedCategory) return false;
+    if (
+      selectedCategories.length > 0 &&
+      !selectedCategories.includes(item.category)
+    ) {
+      return false;
+    }
     if (search.trim()) {
       const q = search.toLowerCase();
       if (!item.name.toLowerCase().includes(q) && !(item.sku ?? "").toLowerCase().includes(q)) {
@@ -100,6 +161,11 @@ export function InventoryManager({
 
   const totalItemsCount = items.reduce((acc, i) => acc + i.stock_quantity, 0);
   const lowStockCount = items.filter((i) => i.stock_quantity <= i.min_stock_alert).length;
+  const totalInventoryCost = items.reduce((acc, i) => {
+    const qty = Number(i.stock_quantity ?? 0);
+    const unitCost = Number(i.cost_price_paisa ?? 0);
+    return acc + (Number.isFinite(qty) ? qty : 0) * (Number.isFinite(unitCost) ? unitCost : 0);
+  }, 0);
   const totalValuation = items.reduce((acc, i) => acc + i.stock_quantity * i.retail_price_paisa, 0);
 
   function openAddModal() {
@@ -217,7 +283,7 @@ export function InventoryManager({
   return (
     <div className="space-y-6">
       {/* Top Metrics Cards */}
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Card className="border-brand/30 bg-brand-soft/10">
           <CardContent className="p-4">
             <div className="flex items-center justify-between">
@@ -237,6 +303,17 @@ export function InventoryManager({
             </div>
             <p className="mt-1 font-mono text-xl font-extrabold text-warning">{lowStockCount}</p>
             <p className="mt-0.5 text-[10px] text-muted">Items at or below minimum threshold</p>
+          </CardContent>
+        </Card>
+
+        <Card className="border-[var(--info)]/30 bg-surface">
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-[var(--info)]">Total Inventory Cost</span>
+              <Wallet className="h-4 w-4 text-[var(--info)]" />
+            </div>
+            <p className="mt-1 font-mono text-xl font-extrabold text-ink">{formatPkr(totalInventoryCost)}</p>
+            <p className="mt-0.5 text-[10px] text-muted">Purchase cost valuation</p>
           </CardContent>
         </Card>
 
@@ -282,18 +359,155 @@ export function InventoryManager({
         </div>
       </div>
 
-      {/* Category Filter Pills */}
-      <div className="flex flex-wrap gap-1.5">
-        {filterCategories.map((cat, idx) => (
+      {/* Searchable Multi-Select Category Filter Bar & Quick Toggles */}
+      <div className="space-y-2.5">
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Searchable Multi-Select Dropdown */}
+          <div className="relative" ref={categoryMenuRef}>
+            <button
+              type="button"
+              onClick={() => setCategoryMenuOpen((v) => !v)}
+              aria-expanded={categoryMenuOpen}
+              className={`inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-xs font-extrabold transition cursor-pointer ${
+                selectedCategories.length > 0
+                  ? "border-[var(--primary)] bg-[var(--primary)]/10 text-[var(--primary)]"
+                  : "border-[var(--border)] bg-[var(--surface)] text-[var(--foreground)] hover:border-[var(--primary)]/40"
+              }`}
+            >
+              <Filter className="h-3.5 w-3.5 shrink-0" />
+              <span>
+                {selectedCategories.length === 0
+                  ? "All Categories"
+                  : `${selectedCategories.length} Categor${selectedCategories.length === 1 ? "y" : "ies"} Selected`}
+              </span>
+              <ChevronDown
+                className={`h-3.5 w-3.5 transition-transform ${categoryMenuOpen ? "rotate-180" : ""}`}
+              />
+            </button>
+
+            {categoryMenuOpen && (
+              <div className="glass-modal absolute left-0 mt-2 w-72 sm:w-80 rounded-2xl p-3 z-40 space-y-2.5">
+                <div className="relative">
+                  <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--muted)]" />
+                  <Input
+                    value={categorySearch}
+                    onChange={(e) => setCategorySearch(e.target.value)}
+                    placeholder="Search categories..."
+                    className="h-8 pl-8 text-xs"
+                  />
+                </div>
+
+                <div className="flex items-center justify-between text-[11px] px-1">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedCategories([...uniqueCategories])}
+                    className="font-bold text-[var(--primary)] hover:underline cursor-pointer"
+                  >
+                    Select All ({uniqueCategories.length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={clearSelectedCategories}
+                    className="font-bold text-[var(--muted)] hover:text-[var(--foreground)] cursor-pointer"
+                  >
+                    Clear All
+                  </button>
+                </div>
+
+                <div className="max-h-56 overflow-y-auto space-y-1 pr-1">
+                  {visibleDropdownCategories.length === 0 ? (
+                    <p className="py-4 text-center text-xs text-[var(--muted)]">
+                      No matching categories.
+                    </p>
+                  ) : (
+                    visibleDropdownCategories.map((cat) => {
+                      const checked = selectedCategories.includes(cat);
+                      const count = categoryItemCounts.get(cat) ?? 0;
+                      return (
+                        <button
+                          key={cat}
+                          type="button"
+                          onClick={() => toggleCategorySelection(cat)}
+                          className={`w-full flex items-center justify-between gap-2 rounded-xl px-2.5 py-2 text-xs transition cursor-pointer ${
+                            checked
+                              ? "bg-[var(--primary)]/12 text-[var(--foreground)] font-bold"
+                              : "hover:bg-[var(--warm)] text-[var(--foreground-secondary)] font-medium"
+                          }`}
+                        >
+                          <span className="flex items-center gap-2 min-w-0">
+                            <span
+                              className={`h-4 w-4 rounded-md border flex items-center justify-center shrink-0 transition ${
+                                checked
+                                  ? "bg-[var(--primary)] border-[var(--primary)] text-white"
+                                  : "border-[var(--border-strong)] bg-[var(--surface)]"
+                              }`}
+                            >
+                              {checked && <Check className="h-3 w-3" />}
+                            </span>
+                            <span className="truncate">{cat}</span>
+                          </span>
+                          <span className="font-mono text-[10px] text-[var(--muted)] shrink-0">
+                            {count}
+                          </span>
+                        </button>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {selectedCategories.length > 0 && (
+            <button
+              type="button"
+              onClick={clearSelectedCategories}
+              className="inline-flex items-center gap-1 rounded-xl border border-rose-500/30 bg-rose-500/10 px-2.5 py-1.5 text-xs font-bold text-rose-500 hover:bg-rose-500/15 transition cursor-pointer"
+            >
+              <X className="h-3.5 w-3.5" /> Clear ({selectedCategories.length})
+            </button>
+          )}
+
+          <span className="text-[11px] font-mono text-[var(--muted)] ml-auto">
+            Showing {filteredItems.length} of {items.length} products
+          </span>
+        </div>
+
+        {/* Multi-Select Quick Toggle Pills */}
+        <div className="flex flex-wrap gap-1.5">
           <button
-            key={`${cat}-${idx}`}
             type="button"
-            onClick={() => setSelectedCategory(cat)}
-            className={`rounded-xl px-3 py-1.5 text-xs font-extrabold transition ${selectedCategory === cat ? "bg-brand text-white shadow-xs" : "border border-border bg-surface text-muted hover:text-ink"}`}
+            onClick={clearSelectedCategories}
+            className={`rounded-xl px-3 py-1.5 text-xs font-extrabold transition cursor-pointer ${
+              selectedCategories.length === 0
+                ? "bg-brand text-white shadow-xs"
+                : "border border-border bg-surface text-muted hover:text-ink"
+            }`}
           >
-            {cat}
+            ALL ({items.length})
           </button>
-        ))}
+          {uniqueCategories.map((cat, idx) => {
+            const active = selectedCategories.includes(cat);
+            return (
+              <button
+                key={`${cat}-${idx}`}
+                type="button"
+                onClick={() => toggleCategorySelection(cat)}
+                className={`inline-flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-extrabold transition cursor-pointer ${
+                  active
+                    ? "bg-brand text-white shadow-xs"
+                    : "border border-border bg-surface text-muted hover:text-ink"
+                }`}
+              >
+                {active && <Check className="h-3 w-3 shrink-0" />}
+                <span>{cat}</span>
+                <span className="font-mono text-[10px] opacity-80">
+                  ({categoryItemCounts.get(cat) ?? 0})
+                </span>
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       {/* Mobile Stacked Data Cards (<768px) */}

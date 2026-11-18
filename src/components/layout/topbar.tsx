@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import type { UserRole } from "@/types/system";
 import { SignOutDialog } from "@/components/auth/sign-out-dialog";
+import { ActiveShiftBar } from "@/components/layout/active-shift-bar";
 
 interface TopbarProps {
   onOpenMobileMenu?: () => void;
@@ -113,18 +114,13 @@ export function Topbar({
             </span>
           </div>
 
-          <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-xl bg-[var(--warm)] border border-[var(--border)] text-xs font-mono text-[var(--foreground)] shadow-[inset_0_1px_0_var(--glass-highlight)]">
-            <span className="text-[var(--foreground-secondary)]">Shifts:</span>
-            <span className="font-semibold">08:00–16:00</span>
-            <span className="text-[var(--border-strong)]">|</span>
-            <span className="font-semibold">16:00–00:00 (PKT)</span>
-          </div>
+          <ActiveShiftBar userRole={role} />
         </div>
 
         <div className="flex items-center gap-2 sm:gap-3.5 shrink-0">
           <div className="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-xl border border-[var(--success)]/20 bg-[var(--success-soft)] text-[var(--success)] text-xs font-bold shadow-[inset_0_1px_0_var(--glass-highlight)]">
             <Cloud className="h-3.5 w-3.5" />
-            <span>{supabaseReady ? "Cloud Connected" : "Offline Mode"}</span>
+            <span>{supabaseReady ? "Local PostgreSQL Connected" : "DB Offline"}</span>
           </div>
 
           <div className="relative" ref={notifRef}>

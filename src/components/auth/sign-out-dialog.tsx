@@ -4,11 +4,6 @@ import * as React from "react";
 import { useRouter } from "next/navigation";
 import { AlertTriangle, LogOut, Shield, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import {
-  clearBrowserAuthArtifacts,
-  createSupabaseBrowserClient,
-  isSupabaseConfigured,
-} from "@/lib/supabase/client";
 
 interface SignOutDialogProps {
   open: boolean;
@@ -20,23 +15,20 @@ interface SignOutDialogProps {
 export function clearUserSessionCaches(): void {
   if (typeof window === "undefined") return;
   try {
-    clearBrowserAuthArtifacts();
     window.sessionStorage.clear();
-    // Preserve terminal counter choice, clear any auth/session cached keys
-    window.localStorage.removeItem("technoworld_remember_device");
     for (let i = window.localStorage.length - 1; i >= 0; i--) {
       const key = window.localStorage.key(i);
-      if (
-        key &&
-        (key.startsWith("sb-") ||
-          key.startsWith("supabase.") ||
-          key.startsWith("tw_user_"))
-      ) {
+      if (key && key.startsWith("tw_user_")) {
         window.localStorage.removeItem(key);
       }
     }
+    if ("BroadcastChannel" in window) {
+      const ch = new BroadcastChannel("tw_auth_channel");
+      ch.postMessage({ type: "SIGNED_OUT" });
+      ch.close();
+    }
   } catch {
-    // Ignore storage cleanup restrictions
+    // Ignore storage cleanup issues
   }
 }
 
@@ -45,19 +37,6 @@ export async function performVerifiedSignOut(): Promise<{
   error?: string;
 }> {
   try {
-    if (isSupabaseConfigured()) {
-      const supabase = createSupabaseBrowserClient();
-      const { error: clientError } = await supabase.auth.signOut({
-        scope: "local",
-      });
-      if (clientError) {
-        return {
-          ok: false,
-          error: clientError.message || "Failed to sign out from Supabase.",
-        };
-      }
-    }
-
     const res = await fetch("/api/auth/signout", {
       method: "POST",
       credentials: "same-origin",
@@ -182,7 +161,7 @@ export function SignOutDialog({
             </span>
           </div>
           <p className="text-[var(--foreground-secondary)] leading-relaxed">
-            Signing out ends your authenticated session on this browser, clears session cookies and temporary cached data, and requires your password before accessing protected shop routes again. Any unsaved form changes on screen will not be submitted.
+            Signing out revokes your session in the local database, clears session cookies and temporary cached data, and requires your password before accessing protected shop routes again.
           </p>
         </div>
 

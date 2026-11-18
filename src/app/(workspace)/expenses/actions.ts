@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { getAuthenticatedShopContext } from "@/lib/auth/session";
-import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import { withTransaction } from "@/lib/db/pool";
 
 export type AccountBucket =
   | "CASH_TILL"
@@ -50,73 +50,85 @@ export async function createExpenseAction(payload: CreateExpensePayload) {
     throw new Error("Please enter what this expense was for.");
   }
 
-  const admin = createSupabaseAdminClient();
   const isTillPayout = payload.paymentSource === "CASH_TILL";
 
-  let activeSession: { id: string; expected_closing_paisa: number } | null = null;
-  if (isTillPayout) {
-    const query = admin
-      .from("cash_sessions")
-      .select("id, expected_closing_paisa")
-      .eq("business_id", ctx.businessId)
-      .eq("status", "OPEN");
+  await withTransaction(async (client) => {
+    let activeSession: { id: string; expected_closing_paisa: number } | null = null;
+    if (isTillPayout) {
+      const sessRes = payload.cashSessionId
+        ? await client.query<{ id: string; expected_closing_paisa: string | number }>(
+            `SELECT id, expected_closing_paisa
+             FROM cash_sessions
+             WHERE business_id = $1 AND status = 'OPEN' AND id = $2
+             FOR UPDATE`,
+            [ctx.businessId, payload.cashSessionId]
+          )
+        : await client.query<{ id: string; expected_closing_paisa: string | number }>(
+            `SELECT id, expected_closing_paisa
+             FROM cash_sessions
+             WHERE business_id = $1 AND status = 'OPEN'
+             ORDER BY opened_at ASC
+             LIMIT 1
+             FOR UPDATE`,
+            [ctx.businessId]
+          );
 
-    const { data: session } = payload.cashSessionId
-      ? await query.eq("id", payload.cashSessionId).maybeSingle()
-      : await query.order("opened_at", { ascending: true }).limit(1).maybeSingle();
-
-    if (session) {
-      activeSession = {
-        id: String(session.id),
-        expected_closing_paisa: Number(session.expected_closing_paisa ?? 0),
-      };
+      if (sessRes.rows[0]) {
+        activeSession = {
+          id: String(sessRes.rows[0].id),
+          expected_closing_paisa: Number(sessRes.rows[0].expected_closing_paisa ?? 0),
+        };
+      }
     }
-  }
 
-  const { data: inserted, error: insErr } = await admin
-    .from("expenses")
-    .insert({
-      business_id: ctx.businessId,
-      cash_session_id: isTillPayout && activeSession ? activeSession.id : null,
-      category: payload.category || "Shop Expense",
-      description: cleanDesc,
-      amount_paisa: amountPaisa,
-      payment_source: payload.paymentSource,
-      expense_date: payload.expenseDate,
-      recorded_by: ctx.userId,
-      notes: payload.notes?.trim() || null,
-    })
-    .select("id")
-    .single();
+    const insRes = await client.query<{ id: string }>(
+      `INSERT INTO expenses (
+         business_id, cash_session_id, category, description,
+         amount_paisa, payment_source, expense_date, recorded_by, notes
+       )
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+       RETURNING id`,
+      [
+        ctx.businessId,
+        isTillPayout && activeSession ? activeSession.id : null,
+        payload.category || "Shop Expense",
+        cleanDesc,
+        amountPaisa,
+        payload.paymentSource,
+        payload.expenseDate,
+        ctx.userId,
+        payload.notes?.trim() || null,
+      ]
+    );
 
-  if (insErr || !inserted) {
-    throw new Error(`Failed to save expense: ${insErr?.message}`);
-  }
+    const insertedId = insRes.rows[0]?.id;
 
-  if (isTillPayout && activeSession) {
-    await admin
-      .from("cash_sessions")
-      .update({
-        expected_closing_paisa: Math.max(
-          0,
-          activeSession.expected_closing_paisa - amountPaisa
-        ),
-      })
-      .eq("id", activeSession.id);
-  }
+    if (isTillPayout && activeSession) {
+      await client.query(
+        `UPDATE cash_sessions SET expected_closing_paisa = $1 WHERE id = $2`,
+        [Math.max(0, activeSession.expected_closing_paisa - amountPaisa), activeSession.id]
+      );
+    }
 
-  await admin.from("audit_logs").insert({
-    business_id: ctx.businessId,
-    actor_profile_id: ctx.userId,
-    action: "EXPENSE_RECORDED",
-    entity_type: "expenses",
-    entity_id: inserted.id,
-    after_state: {
-      category: payload.category,
-      description: cleanDesc,
-      amount_paisa: amountPaisa,
-      payment_source: payload.paymentSource,
-    },
+    await client.query(
+      `INSERT INTO audit_logs (business_id, actor_name, action_type, description, metadata)
+       VALUES ($1, $2, 'EXPENSE_RECORDED', $3, $4::jsonb)`,
+      [
+        ctx.businessId,
+        ctx.fullName,
+        `Recorded expense: ${cleanDesc} (Rs. ${Math.round(amountPaisa / 100)})`,
+        JSON.stringify({
+          entity_type: "expenses",
+          entity_id: insertedId,
+          after_state: {
+            category: payload.category,
+            description: cleanDesc,
+            amount_paisa: amountPaisa,
+            payment_source: payload.paymentSource,
+          },
+        }),
+      ]
+    );
   });
 
   revalidatePath("/expenses");
@@ -129,63 +141,71 @@ export async function deleteExpenseAction(expenseId: string) {
   const ctx = await getAuthenticatedShopContext();
   if (!ctx || !ctx.businessId) redirect("/login");
 
-  const admin = createSupabaseAdminClient();
+  await withTransaction(async (client) => {
+    const expRes = await client.query<{
+      id: string;
+      description: string;
+      amount_paisa: string | number;
+      payment_source: string | null;
+      cash_session_id: string | null;
+    }>(
+      `SELECT id, description, amount_paisa, payment_source, cash_session_id
+       FROM expenses WHERE id = $1 AND business_id = $2 FOR UPDATE`,
+      [expenseId, ctx.businessId]
+    );
 
-  const { data: exp } = await admin
-    .from("expenses")
-    .select("*")
-    .eq("id", expenseId)
-    .eq("business_id", ctx.businessId)
-    .single();
+    const exp = expRes.rows[0];
+    if (!exp) throw new Error("Expense record not found.");
 
-  if (!exp) throw new Error("Expense record not found.");
+    const sourceVal = String(exp.payment_source ?? "");
+    const sessionId = exp.cash_session_id ? String(exp.cash_session_id) : null;
+    const amountPaisa = Number(exp.amount_paisa ?? 0);
 
-  const sourceVal = String(exp.payment_source ?? "");
-  const sessionId = exp.cash_session_id ? String(exp.cash_session_id) : null;
-  const amountPaisa = Number(exp.amount_paisa ?? 0);
+    await client.query(
+      `DELETE FROM expenses WHERE id = $1 AND business_id = $2`,
+      [expenseId, ctx.businessId]
+    );
 
-  await admin
-    .from("expenses")
-    .delete()
-    .eq("id", expenseId)
-    .eq("business_id", ctx.businessId);
-
-  if (
-    (sourceVal === "CASH_TILL" || sourceVal === "CASH_DRAWER") &&
-    sessionId &&
-    amountPaisa > 0
-  ) {
-    const { data: session } = await admin
-      .from("cash_sessions")
-      .select("id, expected_closing_paisa, status")
-      .eq("id", sessionId)
-      .maybeSingle();
-
-    if (session && session.status === "OPEN") {
-      await admin
-        .from("cash_sessions")
-        .update({
-          expected_closing_paisa:
-            Number(session.expected_closing_paisa ?? 0) + amountPaisa,
-        })
-        .eq("id", session.id);
+    if (
+      (sourceVal === "CASH_TILL" || sourceVal === "CASH_DRAWER") &&
+      sessionId &&
+      amountPaisa > 0
+    ) {
+      const sessRes = await client.query<{
+        id: string;
+        expected_closing_paisa: string | number;
+        status: string;
+      }>(
+        `SELECT id, expected_closing_paisa, status FROM cash_sessions WHERE id = $1 FOR UPDATE`,
+        [sessionId]
+      );
+      const session = sessRes.rows[0];
+      if (session && session.status === "OPEN") {
+        await client.query(
+          `UPDATE cash_sessions SET expected_closing_paisa = $1 WHERE id = $2`,
+          [Number(session.expected_closing_paisa ?? 0) + amountPaisa, session.id]
+        );
+      }
     }
-  }
 
-  await admin.from("audit_logs").insert({
-    business_id: ctx.businessId,
-    actor_name: ctx.fullName,
-    action_type: "EXPENSE_DELETED",
-    description: `Deleted expense: ${exp.description}`,
-    metadata: {
-      entity_type: "expenses",
-      entity_id: expenseId,
-      before_state: {
-        description: exp.description,
-        amount_paisa: amountPaisa,
-        payment_source: sourceVal,
-      },
-    },
+    await client.query(
+      `INSERT INTO audit_logs (business_id, actor_name, action_type, description, metadata)
+       VALUES ($1, $2, 'EXPENSE_DELETED', $3, $4::jsonb)`,
+      [
+        ctx.businessId,
+        ctx.fullName,
+        `Deleted expense: ${exp.description}`,
+        JSON.stringify({
+          entity_type: "expenses",
+          entity_id: expenseId,
+          before_state: {
+            description: exp.description,
+            amount_paisa: amountPaisa,
+            payment_source: sourceVal,
+          },
+        }),
+      ]
+    );
   });
 
   revalidatePath("/expenses");
@@ -208,73 +228,72 @@ export async function transferBetweenAccountsAction(
     throw new Error("Source and destination accounts must be different.");
   }
 
-  const admin = createSupabaseAdminClient();
   const reason =
     payload.reason.trim() ||
     `Transfer ${payload.fromAccount} → ${payload.toAccount}`;
 
-  const { data: mov, error: movErr } = await admin
-    .from("account_movements")
-    .insert({
-      business_id: ctx.businessId,
-      movement_kind: "TRANSFER",
-      from_account: payload.fromAccount,
-      to_account: payload.toAccount,
-      amount_paisa: amountPaisa,
-      reason,
-      recorded_by: ctx.userId,
-    })
-    .select("id")
-    .single();
-
-  if (movErr || !mov) {
-    throw new Error(`Transfer failed: ${movErr?.message}`);
-  }
-
-  // Sync open cash_session drawer if CASH_TILL is involved
-  if (
-    payload.fromAccount === "CASH_TILL" ||
-    payload.toAccount === "CASH_TILL"
-  ) {
-    const { data: session } = await admin
-      .from("cash_sessions")
-      .select("id, expected_closing_paisa")
-      .eq("business_id", ctx.businessId)
-      .eq("status", "OPEN")
-      .order("opened_at", { ascending: true })
-      .limit(1)
-      .maybeSingle();
-
-    if (session) {
-      const delta =
-        payload.toAccount === "CASH_TILL" ? amountPaisa : -amountPaisa;
-      await admin
-        .from("cash_sessions")
-        .update({
-          expected_closing_paisa: Math.max(
-            0,
-            Number(session.expected_closing_paisa ?? 0) + delta
-          ),
-        })
-        .eq("id", session.id);
-    }
-  }
-
-  await admin.from("audit_logs").insert({
-    business_id: ctx.businessId,
-    actor_name: ctx.fullName,
-    action_type: "ACCOUNT_TRANSFER",
-    description: `Transferred Rs. ${Math.round(amountPaisa / 100)} from ${payload.fromAccount} to ${payload.toAccount}`,
-    metadata: {
-      entity_type: "account_movements",
-      entity_id: mov.id,
-      after_state: {
-        from: payload.fromAccount,
-        to: payload.toAccount,
-        amount_paisa: amountPaisa,
+  await withTransaction(async (client) => {
+    const movRes = await client.query<{ id: string }>(
+      `INSERT INTO account_movements (
+         business_id, movement_kind, from_account, to_account,
+         amount_paisa, reason, recorded_by
+       )
+       VALUES ($1, 'TRANSFER', $2, $3, $4, $5, $6)
+       RETURNING id`,
+      [
+        ctx.businessId,
+        payload.fromAccount,
+        payload.toAccount,
+        amountPaisa,
         reason,
-      },
-    },
+        ctx.userId,
+      ]
+    );
+
+    const movId = movRes.rows[0]?.id;
+
+    if (payload.fromAccount === "CASH_TILL" || payload.toAccount === "CASH_TILL") {
+      const sessRes = await client.query<{
+        id: string;
+        expected_closing_paisa: string | number;
+      }>(
+        `SELECT id, expected_closing_paisa
+         FROM cash_sessions
+         WHERE business_id = $1 AND status = 'OPEN'
+         ORDER BY opened_at ASC
+         LIMIT 1
+         FOR UPDATE`,
+        [ctx.businessId]
+      );
+      const session = sessRes.rows[0];
+      if (session) {
+        const delta = payload.toAccount === "CASH_TILL" ? amountPaisa : -amountPaisa;
+        await client.query(
+          `UPDATE cash_sessions SET expected_closing_paisa = $1 WHERE id = $2`,
+          [Math.max(0, Number(session.expected_closing_paisa ?? 0) + delta), session.id]
+        );
+      }
+    }
+
+    await client.query(
+      `INSERT INTO audit_logs (business_id, actor_name, action_type, description, metadata)
+       VALUES ($1, $2, 'ACCOUNT_TRANSFER', $3, $4::jsonb)`,
+      [
+        ctx.businessId,
+        ctx.fullName,
+        `Transferred Rs. ${Math.round(amountPaisa / 100)} from ${payload.fromAccount} to ${payload.toAccount}`,
+        JSON.stringify({
+          entity_type: "account_movements",
+          entity_id: movId,
+          after_state: {
+            from: payload.fromAccount,
+            to: payload.toAccount,
+            amount_paisa: amountPaisa,
+            reason,
+          },
+        }),
+      ]
+    );
   });
 
   revalidatePath("/expenses");
@@ -298,65 +317,66 @@ export async function adjustAccountBalanceAction(payload: AdjustAccountPayload) 
     throw new Error("Actual balance is already equal to the system balance.");
   }
 
-  const admin = createSupabaseAdminClient();
   const reason =
     payload.reason.trim() || "Manual balance reconciliation / computer correction";
 
-  const { data: mov, error: movErr } = await admin
-    .from("account_movements")
-    .insert({
-      business_id: ctx.businessId,
-      movement_kind: "ADJUSTMENT",
-      from_account: deltaPaisa < 0 ? payload.account : null,
-      to_account: deltaPaisa > 0 ? payload.account : null,
-      amount_paisa: Math.abs(deltaPaisa),
-      reason,
-      recorded_by: ctx.userId,
-    })
-    .select("id")
-    .single();
-
-  if (movErr || !mov) {
-    throw new Error(`Adjustment failed: ${movErr?.message}`);
-  }
-
-  if (payload.account === "CASH_TILL") {
-    const { data: session } = await admin
-      .from("cash_sessions")
-      .select("id, expected_closing_paisa")
-      .eq("business_id", ctx.businessId)
-      .eq("status", "OPEN")
-      .order("opened_at", { ascending: true })
-      .limit(1)
-      .maybeSingle();
-
-    if (session) {
-      await admin
-        .from("cash_sessions")
-        .update({ expected_closing_paisa: actualPaisa })
-        .eq("id", session.id);
-    }
-  }
-
-  await admin.from("audit_logs").insert({
-    business_id: ctx.businessId,
-    actor_name: ctx.fullName,
-    action_type: "ACCOUNT_MANUAL_ADJUSTMENT",
-    description: `Manual reconciliation adjustment on ${payload.account}`,
-    metadata: {
-      entity_type: "account_movements",
-      entity_id: mov.id,
-      before_state: {
-        account: payload.account,
-        previous_paisa: currentPaisa,
-      },
-      after_state: {
-        account: payload.account,
-        actual_paisa: actualPaisa,
-        delta_paisa: deltaPaisa,
+  await withTransaction(async (client) => {
+    const movRes = await client.query<{ id: string }>(
+      `INSERT INTO account_movements (
+         business_id, movement_kind, from_account, to_account,
+         amount_paisa, reason, recorded_by
+       )
+       VALUES ($1, 'ADJUSTMENT', $2, $3, $4, $5, $6)
+       RETURNING id`,
+      [
+        ctx.businessId,
+        deltaPaisa < 0 ? payload.account : null,
+        deltaPaisa > 0 ? payload.account : null,
+        Math.abs(deltaPaisa),
         reason,
-      },
-    },
+        ctx.userId,
+      ]
+    );
+    const movId = movRes.rows[0]?.id;
+
+    if (payload.account === "CASH_TILL") {
+      const sessRes = await client.query<{ id: string }>(
+        `SELECT id FROM cash_sessions
+         WHERE business_id = $1 AND status = 'OPEN'
+         ORDER BY opened_at ASC LIMIT 1 FOR UPDATE`,
+        [ctx.businessId]
+      );
+      if (sessRes.rows[0]) {
+        await client.query(
+          `UPDATE cash_sessions SET expected_closing_paisa = $1 WHERE id = $2`,
+          [actualPaisa, sessRes.rows[0].id]
+        );
+      }
+    }
+
+    await client.query(
+      `INSERT INTO audit_logs (business_id, actor_name, action_type, description, metadata)
+       VALUES ($1, $2, 'ACCOUNT_MANUAL_ADJUSTMENT', $3, $4::jsonb)`,
+      [
+        ctx.businessId,
+        ctx.fullName,
+        `Manual reconciliation adjustment on ${payload.account}`,
+        JSON.stringify({
+          entity_type: "account_movements",
+          entity_id: movId,
+          before_state: {
+            account: payload.account,
+            previous_paisa: currentPaisa,
+          },
+          after_state: {
+            account: payload.account,
+            actual_paisa: actualPaisa,
+            delta_paisa: deltaPaisa,
+            reason,
+          },
+        }),
+      ]
+    );
   });
 
   revalidatePath("/expenses");

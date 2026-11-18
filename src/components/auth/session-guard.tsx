@@ -3,10 +3,6 @@
 import * as React from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { Loader2 } from "lucide-react";
-import {
-  createSupabaseBrowserClient,
-  isSupabaseConfigured,
-} from "@/lib/supabase/client";
 import { clearUserSessionCaches } from "@/components/auth/sign-out-dialog";
 
 interface SessionGuardProps {
@@ -18,6 +14,7 @@ export function SessionGuard({ expectedUserId }: SessionGuardProps) {
   const pathname = usePathname();
   const [redirecting, setRedirecting] = React.useState(false);
   const inFlightCheckRef = React.useRef<Promise<void> | null>(null);
+  const lastVerifiedAtRef = React.useRef<number>(0);
 
   const handleSessionLost = React.useCallback(
     (reason: "expired" | "signed_out") => {
@@ -35,24 +32,31 @@ export function SessionGuard({ expectedUserId }: SessionGuardProps) {
   );
 
   const verifySessionOnce = React.useCallback(async () => {
-    if (!isSupabaseConfigured()) return;
-    if (inFlightCheckRef.current) {
-      return inFlightCheckRef.current;
-    }
+    const now = Date.now();
+    // Throttle redundant focus/visibility checks within 10s
+    if (now - lastVerifiedAtRef.current < 10000) return;
+    if (inFlightCheckRef.current) return inFlightCheckRef.current;
 
     const promise = (async () => {
       try {
-        const supabase = createSupabaseBrowserClient();
-        const {
-          data: { user },
-          error,
-        } = await supabase.auth.getUser();
-
-        if (error || !user || user.id !== expectedUserId) {
+        lastVerifiedAtRef.current = Date.now();
+        const res = await fetch("/api/auth/session", {
+          credentials: "same-origin",
+          cache: "no-store",
+        });
+        if (!res.ok) {
+          handleSessionLost("expired");
+          return;
+        }
+        const data = (await res.json()) as {
+          authenticated?: boolean;
+          user?: { userId?: string };
+        };
+        if (!data.authenticated || data.user?.userId !== expectedUserId) {
           handleSessionLost("expired");
         }
       } catch {
-        // Ignore transient offline errors; server middleware guards protected fetches
+        // Ignore transient errors
       } finally {
         inFlightCheckRef.current = null;
       }
@@ -63,22 +67,15 @@ export function SessionGuard({ expectedUserId }: SessionGuardProps) {
   }, [expectedUserId, handleSessionLost]);
 
   React.useEffect(() => {
-    if (!isSupabaseConfigured()) return;
-    const supabase = createSupabaseBrowserClient();
-
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((event, session) => {
-      if (event === "SIGNED_OUT") {
-        handleSessionLost("signed_out");
-      } else if (
-        (event === "TOKEN_REFRESHED" || event === "USER_UPDATED") &&
-        session?.user &&
-        session.user.id !== expectedUserId
-      ) {
-        router.refresh();
-      }
-    });
+    let channel: BroadcastChannel | null = null;
+    if (typeof window !== "undefined" && "BroadcastChannel" in window) {
+      channel = new BroadcastChannel("tw_auth_channel");
+      channel.onmessage = (ev) => {
+        if (ev?.data?.type === "SIGNED_OUT") {
+          handleSessionLost("signed_out");
+        }
+      };
+    }
 
     const onVisibilityOrFocus = () => {
       if (document.visibilityState === "visible") {
@@ -90,11 +87,11 @@ export function SessionGuard({ expectedUserId }: SessionGuardProps) {
     document.addEventListener("visibilitychange", onVisibilityOrFocus);
 
     return () => {
-      subscription.unsubscribe();
+      if (channel) channel.close();
       window.removeEventListener("focus", onVisibilityOrFocus);
       document.removeEventListener("visibilitychange", onVisibilityOrFocus);
     };
-  }, [expectedUserId, handleSessionLost, router, verifySessionOnce]);
+  }, [handleSessionLost, verifySessionOnce]);
 
   if (!redirecting) return null;
 

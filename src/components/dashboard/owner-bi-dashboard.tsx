@@ -23,7 +23,6 @@ import {
   PackageCheck,
   PieChart,
   Printer,
-  RefreshCw,
   Search,
   ShoppingBag,
   Sparkles,
@@ -38,8 +37,11 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/ui/page-header";
+import { SectionRefreshButton } from "@/components/ui/section-refresh-button";
 import { formatPkr } from "@/lib/format/currency";
 import { downloadCsvFile, downloadXlsxWorkbook } from "@/lib/export/xlsx";
+import { useQueryClient } from "@tanstack/react-query";
+import { prefetchWorkspaceRoute } from "@/lib/workspace/prefetch";
 import type {
   BiPeriodKey,
   BiProductStat,
@@ -92,6 +94,11 @@ interface OwnerBiDashboardProps {
   data: OwnerBiPayload;
   userRole: UserRole;
   businessName: string;
+  onPeriodChange?: (period: BiPeriodKey, start?: string, end?: string) => void;
+  onPrefetchPeriod?: (period: BiPeriodKey) => void;
+  onForceRefresh?: () => void | Promise<unknown>;
+  isRefreshing?: boolean;
+  lastUpdatedAt?: number;
 }
 
 const PERIOD_OPTIONS: Array<{ key: BiPeriodKey; label: string }> = [
@@ -166,8 +173,14 @@ export function OwnerBiDashboard({
   data,
   userRole,
   businessName,
+  onPeriodChange,
+  onPrefetchPeriod,
+  onForceRefresh,
+  isRefreshing = false,
+  lastUpdatedAt,
 }: OwnerBiDashboardProps) {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const canViewProfitMargins = userRole === "OWNER" || userRole === "MANAGER";
 
   const [activeTab, setActiveTab] = React.useState<BiTabKey>("overview");
@@ -222,16 +235,24 @@ export function OwnerBiDashboard({
       return;
     }
     setShowCustomDates(false);
-    router.push(`/dashboard?period=${key}`);
+    if (onPeriodChange) {
+      onPeriodChange(key);
+    } else {
+      router.push(`/dashboard?period=${key}`);
+    }
   };
 
   const handleApplyCustomDates = (e: React.FormEvent) => {
     e.preventDefault();
-    router.push(
-      `/dashboard?period=custom&start=${encodeURIComponent(
-        customStart
-      )}&end=${encodeURIComponent(customEnd)}`
-    );
+    if (onPeriodChange) {
+      onPeriodChange("custom", customStart, customEnd);
+    } else {
+      router.push(
+        `/dashboard?period=custom&start=${encodeURIComponent(
+          customStart
+        )}&end=${encodeURIComponent(customEnd)}`
+      );
+    }
   };
 
   // Product ranking computation
@@ -503,16 +524,11 @@ export function OwnerBiDashboard({
           description={`Live database telemetry for ${data.dateRange.label} (${data.dateRange.startDate} to ${data.dateRange.endDate}, Asia/Karachi).`}
           actions={
             <div className="flex flex-wrap items-center gap-2">
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                onClick={() => router.refresh()}
-                className="gap-1.5"
-              >
-                <RefreshCw className="h-3.5 w-3.5" />
-                Refresh
-              </Button>
+              <SectionRefreshButton
+                onRefresh={() => (onForceRefresh ? onForceRefresh() : router.refresh())}
+                isFetching={isRefreshing}
+                lastUpdatedAt={lastUpdatedAt}
+              />
               {canViewProfitMargins && (
                 <>
                   <Button
@@ -565,6 +581,12 @@ export function OwnerBiDashboard({
                     <button
                       key={opt.key}
                       type="button"
+                      onMouseEnter={() => {
+                        if (opt.key !== "custom") onPrefetchPeriod?.(opt.key);
+                      }}
+                      onFocus={() => {
+                        if (opt.key !== "custom") onPrefetchPeriod?.(opt.key);
+                      }}
                       onClick={() => handleSelectPeriod(opt.key)}
                       className={`px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer ${
                         active
@@ -640,7 +662,11 @@ export function OwnerBiDashboard({
                 </p>
               </div>
             </div>
-            <Link href="/dashboard/closing" className="w-full sm:w-auto shrink-0">
+            <Link
+              href="/dashboard/closing"
+              onMouseEnter={() => prefetchWorkspaceRoute(queryClient, "/dashboard/closing")}
+              className="w-full sm:w-auto shrink-0"
+            >
               <Button className="w-full font-bold text-xs gap-2">
                 Open Daily Closing <ArrowRight className="h-4 w-4" />
               </Button>
@@ -2121,56 +2147,85 @@ export function OwnerBiDashboard({
       {/* ===================================================================== */}
       {/* TAB 7: FINANCIAL SUMMARY (P&L RECONCILIATION & CLOSING HISTORY)       */}
       {/* ===================================================================== */}
+      {/* =================================================================== */}
+      {/* TAB 7: ACCESSORIES PROFIT & LOSS & SAVED CLOSINGS HISTORY          */}
+      {/* =================================================================== */}
       {activeTab === "financials" && canViewProfitMargins && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <Card>
             <CardContent className="p-4 sm:p-6 space-y-3">
-              <h3 className="font-display text-base font-extrabold text-[var(--foreground)]">
-                Profit &amp; Loss Reconciliation ({data.dateRange.label})
-              </h3>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h3 className="font-display text-base font-extrabold text-[var(--foreground)]">
+                  Accessories Profit &amp; Loss ({data.dateRange.label})
+                </h3>
+                <Badge variant="brand" className="text-[10px] font-mono">
+                  ACCESSORIES ONLY
+                </Badge>
+              </div>
+              <p className="text-[11px] text-[var(--muted)]">
+                Movies, Printing &amp; Composing excluded ({data.accessoriesPnl.excludedServiceLines} service lines / {formatPkr(data.accessoriesPnl.excludedServiceRevenuePaisa)} preserved in DB, excluded here).
+              </p>
               <div className="space-y-2 text-xs divide-y divide-[var(--border)]">
                 <div className="py-2 flex justify-between">
-                  <span className="text-[var(--foreground-secondary)]">Gross Billed Sales</span>
-                  <span className="font-mono font-bold">{formatPkr(ov.grossBilledPaisa)}</span>
+                  <span className="text-[var(--foreground-secondary)]">
+                    Gross Accessory Sales ({data.accessoriesPnl.unitsSold} units • {data.accessoriesPnl.billCount} bills)
+                  </span>
+                  <span className="font-mono font-bold">
+                    {formatPkr(data.accessoriesPnl.grossBilledPaisa)}
+                  </span>
                 </div>
                 <div className="py-2 flex justify-between">
-                  <span className="text-[var(--foreground-secondary)]">Less: Discounts Given</span>
-                  <span className="font-mono text-rose-500">- {formatPkr(ov.discountsPaisa)}</span>
-                </div>
-                <div className="py-2 flex justify-between">
-                  <span className="text-[var(--foreground-secondary)]">Less: Refunds &amp; Voids</span>
-                  <span className="font-mono text-rose-500">- {formatPkr(ov.refundsPaisa)}</span>
+                  <span className="text-[var(--foreground-secondary)]">Less: Discounts Applied</span>
+                  <span className="font-mono text-rose-500">
+                    - {formatPkr(data.accessoriesPnl.discountsPaisa)}
+                  </span>
                 </div>
                 <div className="py-2.5 flex justify-between font-bold text-sm">
-                  <span>Net Revenue</span>
-                  <span className="font-mono">{formatPkr(ov.netRevenuePaisa)}</span>
+                  <span>Net Accessory Revenue</span>
+                  <span className="font-mono">
+                    {formatPkr(data.accessoriesPnl.netRevenuePaisa)}
+                  </span>
                 </div>
                 <div className="py-2 flex justify-between">
-                  <span className="text-[var(--foreground-secondary)]">Less: Cost of Goods Sold (FIFO)</span>
-                  <span className="font-mono text-rose-500">- {formatPkr(ov.cogsPaisa)}</span>
+                  <span className="text-[var(--foreground-secondary)]">
+                    Less: Accessory Cost of Goods Sold (FIFO)
+                  </span>
+                  <span className="font-mono text-rose-500">
+                    - {formatPkr(data.accessoriesPnl.cogsPaisa)}
+                  </span>
                 </div>
                 <div className="py-2.5 flex justify-between font-bold text-sm text-emerald-500">
-                  <span>Gross Profit ({ov.grossMarginPct}%)</span>
-                  <span className="font-mono">{formatPkr(ov.grossProfitPaisa)}</span>
+                  <span>
+                    Accessory Gross Profit ({data.accessoriesPnl.grossMarginPct}%)
+                  </span>
+                  <span className="font-mono">
+                    {formatPkr(data.accessoriesPnl.grossProfitPaisa)}
+                  </span>
                 </div>
                 <div className="py-2 flex justify-between">
                   <span className="text-[var(--foreground-secondary)]">Less: Operating Expenses</span>
-                  <span className="font-mono text-rose-500">- {formatPkr(ov.operatingExpensesPaisa)}</span>
+                  <span className="font-mono text-rose-500">
+                    - {formatPkr(data.accessoriesPnl.operatingExpensesPaisa)}
+                  </span>
                 </div>
                 <div className="py-2 flex justify-between">
                   <span className="text-[var(--foreground-secondary)]">Less: Daily Staff Wages</span>
-                  <span className="font-mono text-rose-500">- {formatPkr(ov.dailyWagesPaisa)}</span>
+                  <span className="font-mono text-rose-500">
+                    - {formatPkr(data.accessoriesPnl.dailyWagesPaisa)}
+                  </span>
                 </div>
                 <div className="py-3 flex justify-between font-black text-base">
-                  <span>Net Operating Profit ({ov.netMarginPct}%)</span>
+                  <span>
+                    Net Accessory Profit ({data.accessoriesPnl.netMarginPct}%)
+                  </span>
                   <span
                     className={`font-mono ${
-                      ov.netOperatingProfitPaisa >= 0
+                      data.accessoriesPnl.netOperatingProfitPaisa >= 0
                         ? "text-emerald-500"
                         : "text-rose-500"
                     }`}
                   >
-                    {formatPkr(ov.netOperatingProfitPaisa)}
+                    {formatPkr(data.accessoriesPnl.netOperatingProfitPaisa)}
                   </span>
                 </div>
               </div>

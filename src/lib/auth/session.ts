@@ -1,12 +1,12 @@
 import { cache } from "react";
 import { cookies } from "next/headers";
-import { createSupabaseServerClient } from "@/lib/supabase/server";
-import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import { dbQueryOne } from "@/lib/db/pool";
+import { AUTH_COOKIE_NAME } from "@/lib/auth/cookie-persistence";
 import {
-  getSupabaseBrowserEnv,
-  getSupabaseServiceRoleKey,
-} from "@/lib/supabase/env";
-import { UserRole } from "@/types/system";
+  extractVerifiedRawToken,
+  hashSessionToken,
+} from "@/lib/auth/local-auth";
+import type { UserRole } from "@/types/system";
 
 export interface AuthenticatedShopContext {
   userId: string;
@@ -20,103 +20,60 @@ export interface AuthenticatedShopContext {
 
 export const getAuthenticatedShopContext = cache(
   async (): Promise<AuthenticatedShopContext | null> => {
-    // Mark the route dynamic even when env vars are missing at build time.
-    await cookies();
-
-    if (!getSupabaseBrowserEnv() || !getSupabaseServiceRoleKey()) {
+    const cookieStore = await cookies();
+    const signedCookie = cookieStore.get(AUTH_COOKIE_NAME)?.value;
+    const rawToken = extractVerifiedRawToken(signedCookie);
+    if (!rawToken) {
       return null;
     }
 
-    const supabase = await createSupabaseServerClient();
-    const {
-      data: { user },
-      error: authError,
-    } = await supabase.auth.getUser();
+    const tokenHash = hashSessionToken(rawToken);
+    const row = await dbQueryOne<{
+      user_id: string;
+      email: string;
+      full_name: string | null;
+      business_id: string | null;
+      business_name: string | null;
+      role_code: string | null;
+      employee_id: string | null;
+    }>(
+      `SELECT
+         s.user_id,
+         u.email,
+         COALESCE(p.full_name, u.full_name, split_part(u.email, '@', 1)) AS full_name,
+         m.business_id,
+         b.name AS business_name,
+         r.code AS role_code,
+         e.id AS employee_id
+       FROM public.auth_sessions s
+       JOIN public.auth_users u ON u.id = s.user_id
+       LEFT JOIN public.profiles p ON p.id = u.id
+       LEFT JOIN public.memberships m ON m.profile_id = u.id AND m.status = 'ACTIVE'
+       LEFT JOIN public.businesses b ON b.id = m.business_id
+       LEFT JOIN public.roles r ON r.id = m.role_id
+       LEFT JOIN public.employees e ON e.business_id = m.business_id
+         AND e.profile_id = u.id
+       WHERE s.token_hash = $1
+         AND s.expires_at > now()
+       ORDER BY m.created_at ASC NULLS LAST
+       LIMIT 1`,
+      [tokenHash]
+    );
 
-    if (authError || !user) {
+    if (!row) {
       return null;
-    }
-
-    const admin = createSupabaseAdminClient();
-
-    // Run profile and membership lookups in parallel instead of sequentially
-    const [{ data: profile }, { data: membership }] = await Promise.all([
-      admin
-        .from("profiles")
-        .select("full_name")
-        .eq("id", user.id)
-        .maybeSingle(),
-      admin
-        .from("memberships")
-        .select(
-          `
-          business_id,
-          status,
-          businesses ( name ),
-          roles ( code )
-        `
-        )
-        .eq("profile_id", user.id)
-        .eq("status", "ACTIVE")
-        .limit(1)
-        .maybeSingle(),
-    ]);
-
-    const fallbackName =
-      profile?.full_name ||
-      (typeof user.user_metadata?.full_name === "string"
-        ? user.user_metadata.full_name
-        : user.email?.split("@")[0] ?? "Shop User");
-
-    if (!membership) {
-      return {
-        userId: user.id,
-        email: user.email ?? "",
-        fullName: fallbackName,
-        businessId: null,
-        businessName: null,
-        role: "OWNER",
-        employeeId: null,
-      };
-    }
-
-    const bizRecord = Array.isArray(membership.businesses)
-      ? membership.businesses[0]
-      : membership.businesses;
-    const roleRecord = Array.isArray(membership.roles)
-      ? membership.roles[0]
-      : membership.roles;
-
-    let employeeId: string | null = null;
-    if (membership.business_id) {
-      const { data: employeeByProfile } = await admin
-        .from("employees")
-        .select("id")
-        .eq("business_id", membership.business_id)
-        .eq("profile_id", user.id)
-        .maybeSingle();
-
-      if (employeeByProfile?.id) {
-        employeeId = employeeByProfile.id;
-      } else if (user.email) {
-        const { data: employeeByEmail } = await admin
-          .from("employees")
-          .select("id")
-          .eq("business_id", membership.business_id)
-          .ilike("email", user.email)
-          .maybeSingle();
-        employeeId = employeeByEmail?.id ?? null;
-      }
     }
 
     return {
-      userId: user.id,
-      email: user.email ?? "",
-      fullName: fallbackName,
-      businessId: membership.business_id,
-      businessName: bizRecord?.name ?? "TechnoWorld",
-      role: (roleRecord?.code as UserRole) ?? "EMPLOYEE",
-      employeeId,
+      userId: row.user_id,
+      email: row.email,
+      fullName: row.full_name || "Shop User",
+      businessId: row.business_id,
+      businessName: row.business_id ? row.business_name || "TechnoWorld" : null,
+      role: row.business_id
+        ? ((row.role_code as UserRole) || "EMPLOYEE")
+        : "OWNER",
+      employeeId: row.employee_id,
     };
   }
 );

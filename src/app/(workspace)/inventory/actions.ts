@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { getAuthenticatedShopContext } from "@/lib/auth/session";
 import { assertAuthorizedRole } from "@/lib/auth/permissions";
-import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import { dbQuery, dbQueryOne } from "@/lib/db/pool";
 
 export interface InventoryItemPayload {
   name: string;
@@ -26,14 +26,13 @@ export async function createCategoryAction(name: string) {
   const cleanName = name.trim();
   if (!cleanName) throw new Error("Category name is required.");
 
-  const admin = createSupabaseAdminClient();
-  const { error } = await admin.from("inventory_categories").insert({
-    business_id: ctx.businessId,
-    name: cleanName,
-  });
+  await dbQuery(
+    `INSERT INTO public.inventory_categories (business_id, name) VALUES ($1, $2)`,
+    [ctx.businessId, cleanName]
+  );
 
-  if (error) throw new Error(`Failed to create category: ${error.message}`);
   revalidatePath("/inventory");
+  revalidatePath("/pos");
 }
 
 export async function updateCategoryAction(id: string, newName: string) {
@@ -44,15 +43,13 @@ export async function updateCategoryAction(id: string, newName: string) {
   const cleanName = newName.trim();
   if (!cleanName) throw new Error("Category name cannot be empty.");
 
-  const admin = createSupabaseAdminClient();
-  const { error } = await admin
-    .from("inventory_categories")
-    .update({ name: cleanName })
-    .eq("id", id)
-    .eq("business_id", ctx.businessId);
+  await dbQuery(
+    `UPDATE public.inventory_categories SET name = $1 WHERE id = $2 AND business_id = $3`,
+    [cleanName, id, ctx.businessId]
+  );
 
-  if (error) throw new Error(`Failed to update category: ${error.message}`);
   revalidatePath("/inventory");
+  revalidatePath("/pos");
 }
 
 export async function deleteCategoryAction(id: string) {
@@ -60,15 +57,13 @@ export async function deleteCategoryAction(id: string) {
   if (!ctx || !ctx.businessId) redirect("/login");
   assertAuthorizedRole(ctx.role, ["OWNER", "MANAGER"], "manage inventory");
 
-  const admin = createSupabaseAdminClient();
-  const { error } = await admin
-    .from("inventory_categories")
-    .delete()
-    .eq("id", id)
-    .eq("business_id", ctx.businessId);
+  await dbQuery(
+    `DELETE FROM public.inventory_categories WHERE id = $1 AND business_id = $2`,
+    [id, ctx.businessId]
+  );
 
-  if (error) throw new Error(`Failed to delete category: ${error.message}`);
   revalidatePath("/inventory");
+  revalidatePath("/pos");
 }
 
 export async function createInventoryItemAction(payload: InventoryItemPayload) {
@@ -79,50 +74,64 @@ export async function createInventoryItemAction(payload: InventoryItemPayload) {
   const cleanName = String(payload.name || "").trim();
   if (!cleanName) throw new Error("Product name is required.");
 
-  const admin = createSupabaseAdminClient();
-  const { error } = await admin.from("inventory_items").insert({
-    business_id: ctx.businessId,
-    name: cleanName,
-    sku: payload.sku?.trim() || `SKU-${Math.floor(1000 + Math.random() * 9000)}`,
-    category: payload.category.trim() || "General",
-    stock_quantity: Math.max(0, Number(payload.stockQuantity) || 0),
-    cost_price_paisa: Math.max(0, Number(payload.costPricePaisa) || 0),
-    retail_price_paisa: Math.max(0, Number(payload.retailPricePaisa) || 0),
-    min_stock_alert: Math.max(0, Number(payload.minStockAlert) || 5),
-    unit: payload.unit?.trim() || "pcs",
-    notes: payload.notes?.trim() || null,
-  });
+  const sku =
+    payload.sku?.trim() || `SKU-${Math.floor(1000 + Math.random() * 9000)}`;
 
-  if (error) throw new Error(`Failed to create inventory item: ${error.message}`);
+  await dbQuery(
+    `INSERT INTO public.inventory_items
+       (business_id, name, sku, category, stock_quantity, cost_price_paisa, retail_price_paisa, min_stock_alert, unit, notes)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+    [
+      ctx.businessId,
+      cleanName,
+      sku,
+      payload.category.trim() || "General",
+      Math.max(0, Number(payload.stockQuantity) || 0),
+      Math.max(0, Number(payload.costPricePaisa) || 0),
+      Math.max(0, Number(payload.retailPricePaisa) || 0),
+      Math.max(0, Number(payload.minStockAlert) || 5),
+      payload.unit?.trim() || "pcs",
+      payload.notes?.trim() || null,
+    ]
+  );
+
   revalidatePath("/inventory");
   revalidatePath("/pos");
+  revalidatePath("/dashboard");
 }
 
-export async function updateInventoryItemAction(id: string, payload: InventoryItemPayload) {
+export async function updateInventoryItemAction(
+  id: string,
+  payload: InventoryItemPayload
+) {
   const ctx = await getAuthenticatedShopContext();
   if (!ctx || !ctx.businessId) redirect("/login");
   assertAuthorizedRole(ctx.role, ["OWNER", "MANAGER"], "manage inventory");
 
-  const admin = createSupabaseAdminClient();
-  const { error } = await admin
-    .from("inventory_items")
-    .update({
-      name: payload.name.trim(),
-      sku: payload.sku?.trim() || null,
-      category: payload.category.trim(),
-      stock_quantity: Math.max(0, Number(payload.stockQuantity) || 0),
-      cost_price_paisa: Math.max(0, Number(payload.costPricePaisa) || 0),
-      retail_price_paisa: Math.max(0, Number(payload.retailPricePaisa) || 0),
-      min_stock_alert: Math.max(0, Number(payload.minStockAlert) || 5),
-      unit: payload.unit.trim(),
-      notes: payload.notes?.trim() || null,
-    })
-    .eq("id", id)
-    .eq("business_id", ctx.businessId);
+  await dbQuery(
+    `UPDATE public.inventory_items
+     SET name = $1, sku = $2, category = $3, stock_quantity = $4,
+         cost_price_paisa = $5, retail_price_paisa = $6,
+         min_stock_alert = $7, unit = $8, notes = $9
+     WHERE id = $10 AND business_id = $11`,
+    [
+      payload.name.trim(),
+      payload.sku?.trim() || null,
+      payload.category.trim(),
+      Math.max(0, Number(payload.stockQuantity) || 0),
+      Math.max(0, Number(payload.costPricePaisa) || 0),
+      Math.max(0, Number(payload.retailPricePaisa) || 0),
+      Math.max(0, Number(payload.minStockAlert) || 5),
+      payload.unit.trim(),
+      payload.notes?.trim() || null,
+      id,
+      ctx.businessId,
+    ]
+  );
 
-  if (error) throw new Error(`Failed to update item: ${error.message}`);
   revalidatePath("/inventory");
   revalidatePath("/pos");
+  revalidatePath("/dashboard");
 }
 
 export async function adjustStockAction(id: string, delta: number) {
@@ -130,26 +139,21 @@ export async function adjustStockAction(id: string, delta: number) {
   if (!ctx || !ctx.businessId) redirect("/login");
   assertAuthorizedRole(ctx.role, ["OWNER", "MANAGER"], "manage inventory");
 
-  const admin = createSupabaseAdminClient();
-  const { data: current, error: fetchErr } = await admin
-    .from("inventory_items")
-    .select("stock_quantity")
-    .eq("id", id)
-    .eq("business_id", ctx.businessId)
-    .single();
-
-  if (fetchErr || !current) throw new Error("Item not found.");
+  const current = await dbQueryOne<{ stock_quantity: number }>(
+    `SELECT stock_quantity FROM public.inventory_items WHERE id = $1 AND business_id = $2 LIMIT 1`,
+    [id, ctx.businessId]
+  );
+  if (!current) throw new Error("Item not found.");
 
   const newQty = Math.max(0, Number(current.stock_quantity || 0) + delta);
-  const { error: updateErr } = await admin
-    .from("inventory_items")
-    .update({ stock_quantity: newQty })
-    .eq("id", id)
-    .eq("business_id", ctx.businessId);
+  await dbQuery(
+    `UPDATE public.inventory_items SET stock_quantity = $1 WHERE id = $2 AND business_id = $3`,
+    [newQty, id, ctx.businessId]
+  );
 
-  if (updateErr) throw new Error(`Failed to adjust stock: ${updateErr.message}`);
   revalidatePath("/inventory");
   revalidatePath("/pos");
+  revalidatePath("/dashboard");
 }
 
 export async function deleteInventoryItemAction(id: string) {
@@ -157,14 +161,12 @@ export async function deleteInventoryItemAction(id: string) {
   if (!ctx || !ctx.businessId) redirect("/login");
   assertAuthorizedRole(ctx.role, ["OWNER", "MANAGER"], "manage inventory");
 
-  const admin = createSupabaseAdminClient();
-  const { error } = await admin
-    .from("inventory_items")
-    .delete()
-    .eq("id", id)
-    .eq("business_id", ctx.businessId);
+  await dbQuery(
+    `DELETE FROM public.inventory_items WHERE id = $1 AND business_id = $2`,
+    [id, ctx.businessId]
+  );
 
-  if (error) throw new Error(`Failed to delete item: ${error.message}`);
   revalidatePath("/inventory");
   revalidatePath("/pos");
+  revalidatePath("/dashboard");
 }

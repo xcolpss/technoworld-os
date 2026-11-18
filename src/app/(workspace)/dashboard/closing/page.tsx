@@ -1,30 +1,11 @@
-import { redirect } from "next/navigation";
-import { getAuthenticatedShopContext } from "@/lib/auth/session";
-import { formatPkDateStr } from "@/lib/dashboard/bi-engine";
-import { loadClosingDataForDate } from "@/app/(workspace)/dashboard/closing/actions";
-import { DailyClosingClient } from "@/components/dashboard/daily-closing-client";
+import { Suspense } from "react";
+import { ClosingCachedView } from "@/components/dashboard/closing-cached-view";
+import { WorkspaceSectionSkeleton } from "@/components/ui/workspace-skeleton";
 
-export const dynamic = "force-dynamic";
-
-interface DailyClosingPageProps {
-  searchParams: Promise<{ date?: string }>;
-}
-
-export default async function DailyClosingPage({
-  searchParams,
-}: DailyClosingPageProps) {
-  const ctx = await getAuthenticatedShopContext();
-  if (!ctx || !ctx.businessId) redirect("/login");
-
-  const resolved = await searchParams;
-  const targetDate = resolved?.date || formatPkDateStr();
-  const { record, history } = await loadClosingDataForDate(targetDate);
-
+export default function DailyClosingPage() {
   return (
-    <DailyClosingClient
-      initialRecord={record}
-      initialHistory={history}
-      businessName={ctx.businessName ?? "TechnoWorld"}
-    />
+    <Suspense fallback={<WorkspaceSectionSkeleton cards={4} rows={6} />}>
+      <ClosingCachedView />
+    </Suspense>
   );
 }

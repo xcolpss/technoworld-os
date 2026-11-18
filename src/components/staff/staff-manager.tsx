@@ -67,6 +67,8 @@ interface StaffManagerProps {
   leaves: LeaveRecord[];
   todayStr: string;
   selectedDate?: string;
+  onDateChange?: (date: string) => void;
+  onMutated?: () => void | Promise<unknown>;
   onCreateEmployee: (payload: EmployeePayload) => Promise<void>;
   onUpdateEmployee?: (id: string, payload: EmployeePayload) => Promise<void>;
   onDeleteEmployee?: (id: string) => Promise<void>;
@@ -82,6 +84,8 @@ export function StaffManager({
   leaves,
   todayStr,
   selectedDate,
+  onDateChange,
+  onMutated,
   onCreateEmployee,
   onUpdateEmployee,
   onDeleteEmployee,
@@ -137,7 +141,11 @@ export function StaffManager({
   function handleDateChange(e: React.ChangeEvent<HTMLInputElement>) {
     const newDate = e.target.value;
     setFilterDate(newDate);
-    router.push(`/employees?date=${newDate}`);
+    if (onDateChange) {
+      onDateChange(newDate);
+    } else {
+      router.push(`/employees?date=${newDate}`);
+    }
   }
 
   function formatTime(isoString: string | null) {
@@ -228,7 +236,8 @@ export function StaffManager({
       try {
         await onCheckIn(empId, selectedDate || todayStr);
         setFeedback({ type: "ok", text: "Attendance updated successfully!" });
-        router.refresh();
+        if (onMutated) await onMutated();
+        else router.refresh();
       } catch (err) {
         setFeedback({ type: "err", text: err instanceof Error ? err.message : "Failed to record check-in." });
       }

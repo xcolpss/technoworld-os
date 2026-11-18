@@ -17,7 +17,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input, Label } from "@/components/ui/input";
-import { formatPkr, pkrToPaisa } from "@/lib/format/currency";
+import { formatPkr, paisaToPkr, pkrToPaisa } from "@/lib/format/currency";
 import {
   CompactPrintButton,
   ThermalReceiptSheet,
@@ -68,10 +68,28 @@ export interface CartItem {
   name: string;
   category: string;
   retailPricePaisa: number;
+  defaultRetailPricePaisa?: number;
+  priceInputPkr?: string;
   costPricePaisa: number;
   quantity: number;
   productId?: string;
   maxStock?: number;
+}
+
+function parsePositivePkr(raw: string): { valid: boolean; paisa: number } {
+  const trimmed = raw.trim();
+  if (!trimmed) return { valid: false, paisa: 0 };
+  const parsed = Number(trimmed);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return { valid: false, paisa: 0 };
+  }
+  const paisa = pkrToPaisa(trimmed);
+  return paisa > 0 ? { valid: true, paisa } : { valid: false, paisa: 0 };
+}
+
+function formatPkrInputValue(paisa: number): string {
+  const pkr = paisaToPkr(paisa);
+  return Number.isInteger(pkr) ? String(pkr) : pkr.toFixed(2).replace(/\.?0+$/, "");
 }
 
 interface PosCounterProps {
@@ -225,7 +243,15 @@ export function PosCounter({
   const liveTotalMediaPaisa = mediaUnitPaisa * mediaActualQty;
 
   // LIVE CALCULATOR DERIVED VALUES (Composing)
-  const composingUnitPaisa = composingCustomPricePkr.trim() !== "" ? pkrToPaisa(composingCustomPricePkr) : (currentComposing?.defaultPricePaisa || 50000);
+  const composingDefaultUnitPaisa = currentComposing?.defaultPricePaisa ?? 50000;
+  const composingHasCustomInput = composingCustomPricePkr.trim() !== "";
+  const composingParsedCustom = parsePositivePkr(composingCustomPricePkr);
+  const composingUnitPaisa = composingHasCustomInput
+    ? composingParsedCustom.paisa
+    : composingDefaultUnitPaisa;
+  const composingPriceValid = composingHasCustomInput
+    ? composingParsedCustom.valid
+    : composingDefaultUnitPaisa > 0;
   const composingActualQty = Math.max(1, parseInt(composingQty, 10) || 1);
   const liveTotalComposingPaisa = composingUnitPaisa * composingActualQty;
 
@@ -246,24 +272,40 @@ export function PosCounter({
       return;
     }
     setCart((prev) => {
-      const existing = prev.find((item) => item.productId === product.id);
-      if (existing) {
-        if (existing.quantity >= product.stockQuantity) {
-          setFeedback({ type: "err", text: `Cannot exceed available stock (${product.stockQuantity}).` });
-          return prev;
-        }
+      const totalInCart = prev
+        .filter((item) => item.productId === product.id)
+        .reduce((sum, item) => sum + item.quantity, 0);
+      if (totalInCart >= product.stockQuantity) {
+        setFeedback({ type: "err", text: `Cannot exceed available stock (${product.stockQuantity}).` });
+        return prev;
+      }
+
+      const matchingDefaultLine = prev.find(
+        (item) =>
+          item.productId === product.id &&
+          item.retailPricePaisa === product.retailPricePaisa &&
+          parsePositivePkr(
+            item.priceInputPkr ?? formatPkrInputValue(item.retailPricePaisa)
+          ).paisa === product.retailPricePaisa
+      );
+      if (matchingDefaultLine) {
         return prev.map((item) =>
-          item.productId === product.id ? { ...item, quantity: item.quantity + 1 } : item
+          item.id === matchingDefaultLine.id
+            ? { ...item, quantity: item.quantity + 1 }
+            : item
         );
       }
+
       return [
         ...prev,
         {
-          id: `prod-${product.id}`,
+          id: `prod-${product.id}-${Date.now()}`,
           productId: product.id,
           name: product.name,
           category: product.category,
           retailPricePaisa: product.retailPricePaisa,
+          defaultRetailPricePaisa: product.retailPricePaisa,
+          priceInputPkr: formatPkrInputValue(product.retailPricePaisa),
           costPricePaisa: product.costPricePaisa,
           quantity: 1,
           maxStock: product.stockQuantity,
@@ -272,7 +314,42 @@ export function PosCounter({
     });
   }
 
+  function updateCartItemPrice(cartId: string, pricePkrRaw: string) {
+    const parsed = parsePositivePkr(pricePkrRaw);
+    setCart((prev) =>
+      prev.map((item) =>
+        item.id === cartId
+          ? {
+              ...item,
+              priceInputPkr: pricePkrRaw,
+              retailPricePaisa: parsed.valid ? parsed.paisa : 0,
+            }
+          : item
+      )
+    );
+  }
+
+  function resetCartItemPrice(cartId: string) {
+    setCart((prev) =>
+      prev.map((item) => {
+        if (item.id !== cartId || item.defaultRetailPricePaisa === undefined) {
+          return item;
+        }
+        return {
+          ...item,
+          retailPricePaisa: item.defaultRetailPricePaisa,
+          priceInputPkr: formatPkrInputValue(item.defaultRetailPricePaisa),
+        };
+      })
+    );
+  }
+
   function addPrintJob() {
+    if (liveTotalPrintPaisa <= 0) {
+      setFeedback({ type: "err", text: "Print job price must be greater than Rs. 0." });
+      return;
+    }
+    const defaultTotalPrintPaisa = Math.round(baseRatePaisa * sideMultiplier) * actualPrintQty;
     const name = `Print: ${currentPaper?.name || "Standard"} (${printMode === "BW" ? "B&W" : "Color"}, ${printSideMode === "SINGLE" ? "Single" : "Double"}, ${actualPrintQty} copies)`;
     setCart((prev) => [
       ...prev,
@@ -281,6 +358,8 @@ export function PosCounter({
         name,
         category: "Printing Services",
         retailPricePaisa: liveTotalPrintPaisa,
+        defaultRetailPricePaisa: defaultTotalPrintPaisa,
+        priceInputPkr: formatPkrInputValue(liveTotalPrintPaisa),
         costPricePaisa: Math.round(liveTotalPrintPaisa * 0.3),
         quantity: 1,
       },
@@ -298,6 +377,8 @@ export function PosCounter({
         name,
         category: "Movies & Media",
         retailPricePaisa: liveTotalMediaPaisa,
+        defaultRetailPricePaisa: liveTotalMediaPaisa,
+        priceInputPkr: formatPkrInputValue(liveTotalMediaPaisa),
         costPricePaisa: Math.round(liveTotalMediaPaisa * 0.2),
         quantity: 1,
       },
@@ -307,16 +388,22 @@ export function PosCounter({
   }
 
   function addComposingJob() {
-    const name = `Composing: ${currentComposing?.name || "Service"} (x${composingActualQty})`;
+    if (!composingPriceValid || composingUnitPaisa <= 0) {
+      setFeedback({ type: "err", text: "Enter a valid positive PKR price for Composing before adding to bill." });
+      return;
+    }
+    const name = `Composing: ${currentComposing?.name || "Service"}`;
     setCart((prev) => [
       ...prev,
       {
         id: `comp-${Date.now()}`,
         name,
         category: "Composing Services",
-        retailPricePaisa: liveTotalComposingPaisa,
-        costPricePaisa: Math.round(liveTotalComposingPaisa * 0.1),
-        quantity: 1,
+        retailPricePaisa: composingUnitPaisa,
+        defaultRetailPricePaisa: composingDefaultUnitPaisa,
+        priceInputPkr: formatPkrInputValue(composingUnitPaisa),
+        costPricePaisa: Math.round(composingUnitPaisa * 0.1),
+        quantity: composingActualQty,
       },
     ]);
     setComposingCustomPricePkr("");
@@ -434,6 +521,14 @@ export function PosCounter({
 
   function updateQuantity(cartId: string, delta: number) {
     setCart((prev) => {
+      const target = prev.find((i) => i.id === cartId);
+      if (!target) return prev;
+      if (delta > 0 && target.productId && target.maxStock !== undefined) {
+        const totalForProd = prev
+          .filter((i) => i.productId === target.productId)
+          .reduce((s, i) => s + i.quantity, 0);
+        if (totalForProd >= target.maxStock) return prev;
+      }
       return prev
         .map((item) => {
           if (item.id === cartId) {
@@ -448,10 +543,17 @@ export function PosCounter({
   }
 
   const subtotalPaisa = cart.reduce((acc, item) => acc + item.retailPricePaisa * item.quantity, 0);
+  const totalCostPaisa = cart.reduce((acc, item) => acc + item.costPricePaisa * item.quantity, 0);
   const discountAmountPaisa = Math.max(0, pkrToPaisa(discountPkr));
   const grandTotalPaisa = Math.max(0, subtotalPaisa - discountAmountPaisa);
+  const estimatedBillProfitPaisa = grandTotalPaisa - totalCostPaisa;
 
   const submittingRef = React.useRef(false);
+
+  const hasInvalidCartPrice = cart.some((item) => {
+    const raw = item.priceInputPkr ?? formatPkrInputValue(item.retailPricePaisa);
+    return !parsePositivePkr(raw).valid;
+  });
 
   function handleCheckout() {
     if (submittingRef.current || isPending) {
@@ -459,6 +561,10 @@ export function PosCounter({
     }
     if (cart.length === 0) {
       setFeedback({ type: "err", text: "Cart is empty. Add products or services to checkout." });
+      return;
+    }
+    if (hasInvalidCartPrice) {
+      setFeedback({ type: "err", text: "Each item in the bill must have a valid positive selling price greater than Rs. 0." });
       return;
     }
 
@@ -873,20 +979,49 @@ export function PosCounter({
               </div>
 
               <div>
-                <Label className="text-xs font-bold text-ink">Custom Price Override (Rs.) — Optional</Label>
+                <div className="flex items-center justify-between">
+                  <Label className="text-xs font-bold text-ink">
+                    Custom Selling Price per Unit (Rs.) — Default: {formatPkr(composingDefaultUnitPaisa)}
+                  </Label>
+                  {composingHasCustomInput && (
+                    <button
+                      type="button"
+                      onClick={() => setComposingCustomPricePkr("")}
+                      className="text-[11px] font-bold text-[var(--primary)] hover:underline cursor-pointer"
+                    >
+                      Restore Default
+                    </button>
+                  )}
+                </div>
                 <Input
                   type="number"
-                  min="0"
+                  min="0.01"
+                  step="0.01"
+                  aria-label="Composing custom price in PKR"
                   value={composingCustomPricePkr}
                   onChange={(e) => setComposingCustomPricePkr(e.target.value)}
-                  placeholder="Enter custom price if needed..."
-                  className="mt-1.5 h-9 font-mono text-xs"
+                  placeholder={`Leave blank for default (${formatPkrInputValue(composingDefaultUnitPaisa)} PKR) or enter custom rate...`}
+                  className={`mt-1.5 h-9 font-mono text-xs ${
+                    composingHasCustomInput && !composingParsedCustom.valid
+                      ? "border-[var(--danger)] focus-visible:ring-[var(--danger)]"
+                      : ""
+                  }`}
                 />
+                {composingHasCustomInput && !composingParsedCustom.valid && (
+                  <p className="mt-1 text-[11px] font-semibold text-[var(--danger)]">
+                    Enter a valid positive PKR amount greater than Rs. 0.
+                  </p>
+                )}
               </div>
 
               <div className="rounded-2xl border border-brand/40 bg-brand-soft/10 p-3.5 sm:p-4 space-y-2">
                 <div className="flex flex-wrap items-center justify-between gap-1 text-xs font-bold text-brand-dark">
-                  <span>Live Calculator Breakdown:</span>
+                  <span className="flex items-center gap-1.5">
+                    Live Calculator Breakdown
+                    {composingHasCustomInput && composingParsedCustom.valid && (
+                      <Badge variant="brand" className="text-[10px]">Custom Price</Badge>
+                    )}
+                  </span>
                   <span className="font-mono">{currentComposing?.name || "Service"}</span>
                 </div>
                 <div className="grid grid-cols-3 gap-2 text-center text-xs font-mono pt-1 border-t border-brand/20">
@@ -905,7 +1040,12 @@ export function PosCounter({
                 </div>
               </div>
 
-              <Button type="button" className="w-full" onClick={addComposingJob}>
+              <Button
+                type="button"
+                className="w-full"
+                onClick={addComposingJob}
+                disabled={!composingPriceValid || composingUnitPaisa <= 0}
+              >
                 Add Composing Job to Bill • {formatPkr(liveTotalComposingPaisa)}
               </Button>
             </CardContent>
@@ -938,28 +1078,104 @@ export function PosCounter({
             </div>
 
             {/* Cart Items List */}
-            <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
+            <div className="space-y-2.5 max-h-80 overflow-y-auto pr-1">
               {cart.length === 0 ? (
                 <p className="py-8 text-center text-xs text-muted">Select a tab on the left and add items to bill.</p>
               ) : (
-                cart.map((item) => (
-                  <div key={item.id} className="flex items-center justify-between rounded-xl border border-border bg-warm p-2.5 text-xs">
-                    <div className="flex-1 pr-2">
-                      <p className="font-bold text-ink line-clamp-1">{item.name}</p>
-                      <p className="font-mono text-[10px] text-muted">{formatPkr(item.retailPricePaisa)} each</p>
-                    </div>
+                cart.map((item) => {
+                  const priceRaw =
+                    item.priceInputPkr ?? formatPkrInputValue(item.retailPricePaisa);
+                  const parsedPrice = parsePositivePkr(priceRaw);
+                  const lineTotal = item.retailPricePaisa * item.quantity;
+                  const lineCost = item.costPricePaisa * item.quantity;
+                  const lineProfit = lineTotal - lineCost;
+                  const isCustomPrice =
+                    item.defaultRetailPricePaisa !== undefined &&
+                    item.retailPricePaisa !== item.defaultRetailPricePaisa;
+                  return (
+                    <div key={item.id} className="rounded-xl border border-border bg-warm p-2.5 text-xs space-y-2">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <p className="font-bold text-ink line-clamp-1">{item.name}</p>
+                            {isCustomPrice && (
+                              <span className="rounded-md bg-[var(--primary)]/15 px-1.5 py-0.5 text-[9px] font-extrabold text-[var(--primary)] uppercase">
+                                Custom Price
+                              </span>
+                            )}
+                          </div>
+                          {(item.productId || item.defaultRetailPricePaisa !== undefined) && (
+                            <p className="font-mono text-[10px] text-muted mt-0.5">
+                              Default: {formatPkr(item.defaultRetailPricePaisa ?? item.retailPricePaisa)}
+                              {item.productId ? ` • Cost: ${formatPkr(item.costPricePaisa)}` : ""}
+                            </p>
+                          )}
+                        </div>
 
-                    <div className="flex items-center gap-1.5">
-                      <Button type="button" size="sm" variant="outline" className="h-7 w-7 p-0 text-xs" onClick={() => updateQuantity(item.id, -1)}>
-                        <Minus className="h-3 w-3" />
-                      </Button>
-                      <span className="font-mono font-bold text-ink w-5 text-center">{item.quantity}</span>
-                      <Button type="button" size="sm" variant="outline" className="h-7 w-7 p-0 text-xs" onClick={() => updateQuantity(item.id, 1)}>
-                        <Plus className="h-3 w-3" />
-                      </Button>
+                        <div className="flex items-center gap-1 shrink-0">
+                          <Button type="button" size="sm" variant="outline" className="h-7 w-7 p-0 text-xs" onClick={() => updateQuantity(item.id, -1)}>
+                            <Minus className="h-3 w-3" />
+                          </Button>
+                          <span className="font-mono font-bold text-ink w-5 text-center">{item.quantity}</span>
+                          <Button type="button" size="sm" variant="outline" className="h-7 w-7 p-0 text-xs" onClick={() => updateQuantity(item.id, 1)}>
+                            <Plus className="h-3 w-3" />
+                          </Button>
+                        </div>
+                      </div>
+
+                      {/* Editable Selling Price per Customer (Inventory Products, Composing & Bill Lines) */}
+                      <div className="flex flex-wrap items-center justify-between gap-2 pt-1.5 border-t border-border/60">
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-[10px] font-bold text-muted uppercase">
+                              Sell Price (Rs.)
+                            </span>
+                            <Input
+                              type="number"
+                              min="0.01"
+                              step="0.01"
+                              aria-label={`Selling price for ${item.name}`}
+                              value={priceRaw}
+                              onChange={(e) => updateCartItemPrice(item.id, e.target.value)}
+                              className={`h-7 w-24 text-right font-mono text-xs font-bold bg-[var(--surface)] ${
+                                !parsedPrice.valid
+                                  ? "border-[var(--danger)] text-[var(--danger)]"
+                                  : ""
+                              }`}
+                            />
+                            {isCustomPrice && item.defaultRetailPricePaisa !== undefined && (
+                              <button
+                                type="button"
+                                onClick={() => resetCartItemPrice(item.id)}
+                                className="text-[10px] font-bold text-[var(--primary)] hover:underline cursor-pointer"
+                              >
+                                Reset
+                              </button>
+                            )}
+                          </div>
+                          {!parsedPrice.valid && (
+                            <p className="text-[10px] font-semibold text-[var(--danger)]">
+                              Enter valid price &gt; Rs. 0
+                            </p>
+                          )}
+                        </div>
+                        <div className="text-right font-mono">
+                          <p className="font-extrabold text-ink">{formatPkr(lineTotal)}</p>
+                          {item.productId && (
+                            <p
+                              className={`text-[10px] font-bold ${
+                                lineProfit >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-500"
+                              }`}
+                            >
+                              {lineProfit >= 0 ? "+" : ""}
+                              {formatPkr(lineProfit)} {lineProfit >= 0 ? "profit" : "loss"}
+                            </p>
+                          )}
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                ))
+                  );
+                })
               )}
             </div>
 
@@ -985,6 +1201,22 @@ export function PosCounter({
                 <span className="font-bold text-ink">Grand Total:</span>
                 <span className="font-mono font-extrabold text-brand-dark">{formatPkr(grandTotalPaisa)}</span>
               </div>
+
+              {cart.some((i) => Boolean(i.productId)) && (
+                <div className="flex justify-between text-[11px] font-mono">
+                  <span className="text-muted">Est. Bill Profit:</span>
+                  <span
+                    className={`font-bold ${
+                      estimatedBillProfitPaisa >= 0
+                        ? "text-emerald-600 dark:text-emerald-400"
+                        : "text-rose-500"
+                    }`}
+                  >
+                    {estimatedBillProfitPaisa >= 0 ? "+" : ""}
+                    {formatPkr(estimatedBillProfitPaisa)}
+                  </span>
+                </div>
+              )}
             </div>
 
             {/* Payment Methods */}
@@ -1008,7 +1240,7 @@ export function PosCounter({
               type="button"
               className="w-full mt-2"
               onClick={handleCheckout}
-              disabled={isPending || cart.length === 0}
+              disabled={isPending || cart.length === 0 || hasInvalidCartPrice}
             >
               {isPending ? "Processing Sale..." : `Complete Sale • ${formatPkr(grandTotalPaisa)}`}
             </Button>

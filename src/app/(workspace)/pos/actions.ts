@@ -1,9 +1,10 @@
 "use server";
 
+import type { PoolClient } from "pg";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { getAuthenticatedShopContext } from "@/lib/auth/session";
-import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import { dbQuery, withTransaction } from "@/lib/db/pool";
 import { writeAuditLog } from "@/lib/audit/log";
 
 const ALLOWED_PAYMENT_METHODS = new Set([
@@ -32,207 +33,148 @@ function slugifyCategory(name: string): string {
 }
 
 async function resolveOrCreateProductCategoryId(
-  admin: ReturnType<typeof createSupabaseAdminClient>,
+  client: PoolClient,
   businessId: string,
   categoryName: string
 ): Promise<string | null> {
   const clean = categoryName.trim() || "Accessories";
   const slug = slugifyCategory(clean);
 
-  const { data: existing } = await admin
-    .from("categories")
-    .select("id")
-    .eq("business_id", businessId)
-    .eq("slug", slug)
-    .limit(1)
-    .maybeSingle();
-  if (existing?.id) return String(existing.id);
+  const existing = await client.query<{ id: string }>(
+    `SELECT id FROM categories WHERE business_id = $1 AND slug = $2 LIMIT 1`,
+    [businessId, slug]
+  );
+  if (existing.rows[0]?.id) return String(existing.rows[0].id);
 
-  const { data: created, error: createErr } = await admin
-    .from("categories")
-    .insert({
-      business_id: businessId,
-      name: clean,
-      slug,
-      kind: "PRODUCT",
-      sort_order: 0,
-      status: "ACTIVE",
-    })
-    .select("id")
-    .maybeSingle();
+  const created = await client.query<{ id: string }>(
+    `INSERT INTO categories (business_id, name, slug, kind, sort_order, status)
+     VALUES ($1, $2, $3, 'PRODUCT', 0, 'ACTIVE')
+     ON CONFLICT (business_id, slug) DO UPDATE SET name = EXCLUDED.name
+     RETURNING id`,
+    [businessId, clean, slug]
+  );
+  return created.rows[0]?.id ? String(created.rows[0].id) : null;
+}
 
-  if (createErr) {
-    // Handle concurrent insert race cleanly
-    const { data: retry } = await admin
-      .from("categories")
-      .select("id")
-      .eq("business_id", businessId)
-      .eq("slug", slug)
-      .limit(1)
-      .maybeSingle();
-    return retry?.id ? String(retry.id) : null;
-  }
-
-  return created?.id ? String(created.id) : null;
+interface InventoryRow {
+  id: string;
+  name: string;
+  sku: string | null;
+  category: string | null;
+  stock_quantity: number;
+  cost_price_paisa: number;
+  retail_price_paisa: number;
+  min_stock_alert: number;
+  unit: string | null;
 }
 
 async function resolveOrCreateProductId(
-  admin: ReturnType<typeof createSupabaseAdminClient>,
+  client: PoolClient,
   businessId: string,
-  inventoryItem: {
-    id: string;
-    name: string;
-    sku: string | null;
-    category: string | null;
-    cost_price_paisa: number;
-    retail_price_paisa: number;
-    min_stock_alert?: number | null;
-    unit: string | null;
-  }
+  inventoryItem: InventoryRow
 ): Promise<string> {
-  // Use deterministic unique SKU bound to this inventory item so similar names never collide
   const deterministicSku =
     inventoryItem.sku?.trim() ||
     `INV-${inventoryItem.id.slice(0, 8).toUpperCase()}`;
 
-  const { data: byDeterministicSku } = await admin
-    .from("products")
-    .select("id, name")
-    .eq("business_id", businessId)
-    .eq("sku", deterministicSku)
-    .limit(1)
-    .maybeSingle();
-  if (byDeterministicSku?.id) {
-    return String(byDeterministicSku.id);
-  }
+  const bySku = await client.query<{ id: string }>(
+    `SELECT id FROM products WHERE business_id = $1 AND sku = $2 LIMIT 1`,
+    [businessId, deterministicSku]
+  );
+  if (bySku.rows[0]?.id) return String(bySku.rows[0].id);
 
-  // Fallback unique SKU per inventory UUID in case human SKU collided with an unrelated product
   const uniqueFallbackSku = `INV-${inventoryItem.id.slice(0, 12).toUpperCase()}`;
-  const { data: byUniqueFallback } = await admin
-    .from("products")
-    .select("id")
-    .eq("business_id", businessId)
-    .eq("sku", uniqueFallbackSku)
-    .limit(1)
-    .maybeSingle();
-  if (byUniqueFallback?.id) {
-    return String(byUniqueFallback.id);
-  }
+  const byFallback = await client.query<{ id: string }>(
+    `SELECT id FROM products WHERE business_id = $1 AND sku = $2 LIMIT 1`,
+    [businessId, uniqueFallbackSku]
+  );
+  if (byFallback.rows[0]?.id) return String(byFallback.rows[0].id);
 
   const categoryId = await resolveOrCreateProductCategoryId(
-    admin,
+    client,
     businessId,
     inventoryItem.category || "Accessories"
   );
 
-  // Try inserting with deterministicSku first; if SKU conflict on existing unrelated product, use uniqueFallbackSku
-  const insertPayload = (skuToUse: string) => ({
-    business_id: businessId,
-    category_id: categoryId,
-    sku: skuToUse,
-    name: inventoryItem.name,
-    unit_label: inventoryItem.unit?.trim() || "pcs",
-    cost_price_paisa: Math.max(0, Number(inventoryItem.cost_price_paisa ?? 0)),
-    sale_price_paisa: Math.max(0, Number(inventoryItem.retail_price_paisa ?? 0)),
-    currency: "PKR",
-    low_stock_threshold: Math.max(0, Number(inventoryItem.min_stock_alert ?? 5)),
-    track_inventory: true,
-    status: "ACTIVE",
-  });
-
-  const { data: created, error: insertErr } = await admin
-    .from("products")
-    .insert(insertPayload(deterministicSku))
-    .select("id")
-    .maybeSingle();
-
-  if (created?.id) {
-    return String(created.id);
+  for (const skuToUse of [deterministicSku, uniqueFallbackSku]) {
+    const res = await client.query<{ id: string }>(
+      `INSERT INTO products (
+         business_id, category_id, sku, name, unit_label,
+         cost_price_paisa, sale_price_paisa, currency,
+         low_stock_threshold, track_inventory, status
+       )
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 'PKR', $8, true, 'ACTIVE')
+       ON CONFLICT DO NOTHING
+       RETURNING id`,
+      [
+        businessId,
+        categoryId,
+        skuToUse,
+        inventoryItem.name,
+        inventoryItem.unit?.trim() || "pcs",
+        Math.max(0, Number(inventoryItem.cost_price_paisa ?? 0)),
+        Math.max(0, Number(inventoryItem.retail_price_paisa ?? 0)),
+        Math.max(0, Number(inventoryItem.min_stock_alert ?? 5)),
+      ]
+    );
+    if (res.rows[0]?.id) return String(res.rows[0].id);
   }
 
-  const { data: createdFallback, error: fallbackErr } = await admin
-    .from("products")
-    .insert(insertPayload(uniqueFallbackSku))
-    .select("id")
-    .maybeSingle();
-
-  if (createdFallback?.id) {
-    return String(createdFallback.id);
-  }
-
-  throw new Error(
-    `Failed to link catalog product for ${inventoryItem.name}: ${
-      fallbackErr?.message ?? insertErr?.message ?? "unknown error"
-    }`
-  );
+  throw new Error(`Failed to link catalog product for ${inventoryItem.name}`);
 }
 
 async function resolveOrCreateServiceId(
-  admin: ReturnType<typeof createSupabaseAdminClient>,
+  client: PoolClient,
   businessId: string,
   categoryName: string,
   serviceTitle: string
 ): Promise<string | null> {
   const code = `pos-${slugifyCategory(categoryName)}`.slice(0, 48);
-  const { data: existing } = await admin
-    .from("services")
-    .select("id")
-    .eq("business_id", businessId)
-    .eq("service_code", code)
-    .limit(1)
-    .maybeSingle();
-  if (existing?.id) return String(existing.id);
+  const existing = await client.query<{ id: string }>(
+    `SELECT id FROM services WHERE business_id = $1 AND service_code = $2 LIMIT 1`,
+    [businessId, code]
+  );
+  if (existing.rows[0]?.id) return String(existing.rows[0].id);
 
-  const { data: created } = await admin
-    .from("services")
-    .insert({
-      business_id: businessId,
-      service_code: code,
-      name: categoryName.trim() || serviceTitle.trim() || "POS Service",
-      pricing_mode: "CUSTOM_QUOTE",
-      default_price_paisa: 0,
-      currency: "PKR",
-      status: "ACTIVE",
-    })
-    .select("id")
-    .maybeSingle();
-
-  if (created?.id) return String(created.id);
-
-  const { data: retry } = await admin
-    .from("services")
-    .select("id")
-    .eq("business_id", businessId)
-    .eq("service_code", code)
-    .limit(1)
-    .maybeSingle();
-
-  return retry?.id ? String(retry.id) : null;
-}
-
-interface LotSnapshot {
-  lotId: string;
-  prevRemainingQty: number;
-  prevStatus: string;
+  const created = await client.query<{ id: string }>(
+    `INSERT INTO services (
+       business_id, service_code, name, pricing_mode,
+       default_price_paisa, currency, status
+     )
+     VALUES ($1, $2, $3, 'CUSTOM_QUOTE', 0, 'PKR', 'ACTIVE')
+     ON CONFLICT (business_id, service_code) DO UPDATE SET name = EXCLUDED.name
+     RETURNING id`,
+    [
+      businessId,
+      code,
+      categoryName.trim() || serviceTitle.trim() || "POS Service",
+    ]
+  );
+  return created.rows[0]?.id ? String(created.rows[0].id) : null;
 }
 
 async function consumeFifoLots(
-  admin: ReturnType<typeof createSupabaseAdminClient>,
+  client: PoolClient,
   businessId: string,
   productId: string,
   quantity: number,
-  fallbackUnitCostPaisa: number,
-  lotSnapshots: LotSnapshot[]
+  fallbackUnitCostPaisa: number
 ): Promise<{ unitCostPaisa: number; firstLotId: string | null }> {
-  const { data: lots } = await admin
-    .from("inventory_lots")
-    .select("id, remaining_qty, unit_cost_paisa, status")
-    .eq("business_id", businessId)
-    .eq("product_id", productId)
-    .gt("remaining_qty", 0)
-    .order("received_at", { ascending: true });
+  const { rows: lots } = await client.query<{
+    id: string;
+    remaining_qty: string | number;
+    unit_cost_paisa: string | number;
+    status: string;
+  }>(
+    `SELECT id, remaining_qty, unit_cost_paisa, status
+     FROM inventory_lots
+     WHERE business_id = $1 AND product_id = $2 AND remaining_qty > 0
+     ORDER BY received_at ASC
+     FOR UPDATE`,
+    [businessId, productId]
+  );
 
-  if (!lots || lots.length === 0) {
+  if (lots.length === 0) {
     return { unitCostPaisa: fallbackUnitCostPaisa, firstLotId: null };
   }
 
@@ -246,23 +188,22 @@ async function consumeFifoLots(
     if (!firstLotId) firstLotId = lotId;
     const lotQty = Number(lot.remaining_qty ?? 0);
     const take = Math.min(remaining, lotQty);
-    totalCost += take * Number(lot.unit_cost_paisa ?? fallbackUnitCostPaisa);
+    const lotCost =
+      Number(lot.unit_cost_paisa ?? 0) > 0
+        ? Number(lot.unit_cost_paisa)
+        : fallbackUnitCostPaisa;
+    totalCost += take * lotCost;
     remaining -= take;
 
     const nextRemaining = Math.max(0, lotQty - take);
-    lotSnapshots.push({
-      lotId,
-      prevRemainingQty: lotQty,
-      prevStatus: String(lot.status ?? "ACTIVE"),
-    });
+    const nextStatus = nextRemaining === 0 ? "DEPLETED" : String(lot.status ?? "ACTIVE");
 
-    await admin
-      .from("inventory_lots")
-      .update({
-        remaining_qty: nextRemaining,
-        status: nextRemaining === 0 ? "DEPLETED" : String(lot.status ?? "ACTIVE"),
-      })
-      .eq("id", lotId);
+    await client.query(
+      `UPDATE inventory_lots
+       SET remaining_qty = $1, status = $2
+       WHERE id = $3`,
+      [nextRemaining, nextStatus, lotId]
+    );
   }
 
   if (remaining > 0) {
@@ -293,44 +234,54 @@ export interface CompleteSalePayload {
 }
 
 // Print Papers CRUD
-export async function createPrintPaperAction(payload: { name: string; bwPricePaisa: number; colorPricePaisa: number }) {
+export async function createPrintPaperAction(payload: {
+  name: string;
+  bwPricePaisa: number;
+  colorPricePaisa: number;
+}) {
   const ctx = await getAuthenticatedShopContext();
   if (!ctx || !ctx.businessId) redirect("/login");
 
   const cleanName = payload.name.trim();
   if (!cleanName) throw new Error("Paper type name is required.");
 
-  const admin = createSupabaseAdminClient();
-  const { error } = await admin.from("pos_print_papers").insert({
-    business_id: ctx.businessId,
-    name: cleanName,
-    bw_price_paisa: Math.max(0, payload.bwPricePaisa),
-    color_price_paisa: Math.max(0, payload.colorPricePaisa),
-  });
+  await dbQuery(
+    `INSERT INTO pos_print_papers (business_id, name, bw_price_paisa, color_price_paisa)
+     VALUES ($1, $2, $3, $4)`,
+    [
+      ctx.businessId,
+      cleanName,
+      Math.max(0, Math.round(payload.bwPricePaisa)),
+      Math.max(0, Math.round(payload.colorPricePaisa)),
+    ]
+  );
 
-  if (error) throw new Error(`Failed to create paper type: ${error.message}`);
   revalidatePath("/pos");
 }
 
-export async function updatePrintPaperAction(id: string, payload: { name: string; bwPricePaisa: number; colorPricePaisa: number }) {
+export async function updatePrintPaperAction(
+  id: string,
+  payload: { name: string; bwPricePaisa: number; colorPricePaisa: number }
+) {
   const ctx = await getAuthenticatedShopContext();
   if (!ctx || !ctx.businessId) redirect("/login");
 
   const cleanName = payload.name.trim();
   if (!cleanName) throw new Error("Paper type name is required.");
 
-  const admin = createSupabaseAdminClient();
-  const { error } = await admin
-    .from("pos_print_papers")
-    .update({
-      name: cleanName,
-      bw_price_paisa: Math.max(0, payload.bwPricePaisa),
-      color_price_paisa: Math.max(0, payload.colorPricePaisa),
-    })
-    .eq("id", id)
-    .eq("business_id", ctx.businessId);
+  await dbQuery(
+    `UPDATE pos_print_papers
+     SET name = $1, bw_price_paisa = $2, color_price_paisa = $3
+     WHERE id = $4 AND business_id = $5`,
+    [
+      cleanName,
+      Math.max(0, Math.round(payload.bwPricePaisa)),
+      Math.max(0, Math.round(payload.colorPricePaisa)),
+      id,
+      ctx.businessId,
+    ]
+  );
 
-  if (error) throw new Error(`Failed to update paper type: ${error.message}`);
   revalidatePath("/pos");
 }
 
@@ -338,56 +289,63 @@ export async function deletePrintPaperAction(id: string) {
   const ctx = await getAuthenticatedShopContext();
   if (!ctx || !ctx.businessId) redirect("/login");
 
-  const admin = createSupabaseAdminClient();
-  const { error } = await admin
-    .from("pos_print_papers")
-    .delete()
-    .eq("id", id)
-    .eq("business_id", ctx.businessId);
+  await dbQuery(
+    `DELETE FROM pos_print_papers WHERE id = $1 AND business_id = $2`,
+    [id, ctx.businessId]
+  );
 
-  if (error) throw new Error(`Failed to delete paper type: ${error.message}`);
   revalidatePath("/pos");
 }
 
 // Media Categories CRUD
-export async function createMediaCategoryAction(payload: { type: string; name: string; defaultPricePaisa: number }) {
+export async function createMediaCategoryAction(payload: {
+  type: string;
+  name: string;
+  defaultPricePaisa: number;
+}) {
   const ctx = await getAuthenticatedShopContext();
   if (!ctx || !ctx.businessId) redirect("/login");
 
   const cleanName = payload.name.trim();
   if (!cleanName) throw new Error("Media category name is required.");
 
-  const admin = createSupabaseAdminClient();
-  const { error } = await admin.from("pos_media_categories").insert({
-    business_id: ctx.businessId,
-    type: payload.type.trim() || "MOVIE",
-    name: cleanName,
-    default_price_paisa: Math.max(0, payload.defaultPricePaisa),
-  });
+  await dbQuery(
+    `INSERT INTO pos_media_categories (business_id, type, name, default_price_paisa)
+     VALUES ($1, $2, $3, $4)`,
+    [
+      ctx.businessId,
+      payload.type.trim() || "MOVIE",
+      cleanName,
+      Math.max(0, Math.round(payload.defaultPricePaisa)),
+    ]
+  );
 
-  if (error) throw new Error(`Failed to create media category: ${error.message}`);
   revalidatePath("/pos");
 }
 
-export async function updateMediaCategoryAction(id: string, payload: { type: string; name: string; defaultPricePaisa: number }) {
+export async function updateMediaCategoryAction(
+  id: string,
+  payload: { type: string; name: string; defaultPricePaisa: number }
+) {
   const ctx = await getAuthenticatedShopContext();
   if (!ctx || !ctx.businessId) redirect("/login");
 
   const cleanName = payload.name.trim();
   if (!cleanName) throw new Error("Media category name is required.");
 
-  const admin = createSupabaseAdminClient();
-  const { error } = await admin
-    .from("pos_media_categories")
-    .update({
-      type: payload.type.trim() || "MOVIE",
-      name: cleanName,
-      default_price_paisa: Math.max(0, payload.defaultPricePaisa),
-    })
-    .eq("id", id)
-    .eq("business_id", ctx.businessId);
+  await dbQuery(
+    `UPDATE pos_media_categories
+     SET type = $1, name = $2, default_price_paisa = $3
+     WHERE id = $4 AND business_id = $5`,
+    [
+      payload.type.trim() || "MOVIE",
+      cleanName,
+      Math.max(0, Math.round(payload.defaultPricePaisa)),
+      id,
+      ctx.businessId,
+    ]
+  );
 
-  if (error) throw new Error(`Failed to update media category: ${error.message}`);
   revalidatePath("/pos");
 }
 
@@ -395,54 +353,56 @@ export async function deleteMediaCategoryAction(id: string) {
   const ctx = await getAuthenticatedShopContext();
   if (!ctx || !ctx.businessId) redirect("/login");
 
-  const admin = createSupabaseAdminClient();
-  const { error } = await admin
-    .from("pos_media_categories")
-    .delete()
-    .eq("id", id)
-    .eq("business_id", ctx.businessId);
+  await dbQuery(
+    `DELETE FROM pos_media_categories WHERE id = $1 AND business_id = $2`,
+    [id, ctx.businessId]
+  );
 
-  if (error) throw new Error(`Failed to delete media category: ${error.message}`);
   revalidatePath("/pos");
 }
 
 // Composing Services CRUD
-export async function createComposingServiceAction(payload: { name: string; defaultPricePaisa: number }) {
+export async function createComposingServiceAction(payload: {
+  name: string;
+  defaultPricePaisa: number;
+}) {
   const ctx = await getAuthenticatedShopContext();
   if (!ctx || !ctx.businessId) redirect("/login");
 
   const cleanName = payload.name.trim();
   if (!cleanName) throw new Error("Service name is required.");
 
-  const admin = createSupabaseAdminClient();
-  const { error } = await admin.from("pos_composing_services").insert({
-    business_id: ctx.businessId,
-    name: cleanName,
-    default_price_paisa: Math.max(0, payload.defaultPricePaisa),
-  });
+  await dbQuery(
+    `INSERT INTO pos_composing_services (business_id, name, default_price_paisa)
+     VALUES ($1, $2, $3)`,
+    [ctx.businessId, cleanName, Math.max(0, Math.round(payload.defaultPricePaisa))]
+  );
 
-  if (error) throw new Error(`Failed to create composing service: ${error.message}`);
   revalidatePath("/pos");
 }
 
-export async function updateComposingServiceAction(id: string, payload: { name: string; defaultPricePaisa: number }) {
+export async function updateComposingServiceAction(
+  id: string,
+  payload: { name: string; defaultPricePaisa: number }
+) {
   const ctx = await getAuthenticatedShopContext();
   if (!ctx || !ctx.businessId) redirect("/login");
 
   const cleanName = payload.name.trim();
   if (!cleanName) throw new Error("Service name is required.");
 
-  const admin = createSupabaseAdminClient();
-  const { error } = await admin
-    .from("pos_composing_services")
-    .update({
-      name: cleanName,
-      default_price_paisa: Math.max(0, payload.defaultPricePaisa),
-    })
-    .eq("id", id)
-    .eq("business_id", ctx.businessId);
+  await dbQuery(
+    `UPDATE pos_composing_services
+     SET name = $1, default_price_paisa = $2
+     WHERE id = $3 AND business_id = $4`,
+    [
+      cleanName,
+      Math.max(0, Math.round(payload.defaultPricePaisa)),
+      id,
+      ctx.businessId,
+    ]
+  );
 
-  if (error) throw new Error(`Failed to update composing service: ${error.message}`);
   revalidatePath("/pos");
 }
 
@@ -450,14 +410,11 @@ export async function deleteComposingServiceAction(id: string) {
   const ctx = await getAuthenticatedShopContext();
   if (!ctx || !ctx.businessId) redirect("/login");
 
-  const admin = createSupabaseAdminClient();
-  const { error } = await admin
-    .from("pos_composing_services")
-    .delete()
-    .eq("id", id)
-    .eq("business_id", ctx.businessId);
+  await dbQuery(
+    `DELETE FROM pos_composing_services WHERE id = $1 AND business_id = $2`,
+    [id, ctx.businessId]
+  );
 
-  if (error) throw new Error(`Failed to delete composing service: ${error.message}`);
   revalidatePath("/pos");
 }
 
@@ -469,19 +426,23 @@ export async function completePosSaleAction(payload: CompleteSalePayload) {
     throw new Error("Cart is empty.");
   }
 
-  const admin = createSupabaseAdminClient();
   const normalizedMethod = normalizePaymentMethod(payload.paymentMethod);
-
-  // Idempotency guard: prevent duplicate transactions on accidental double-click or retry
   const cleanClientTxId = payload.clientTxId?.trim() || null;
-  if (cleanClientTxId) {
-    const { data: existingSale } = await admin
-      .from("sales")
-      .select("id, sale_number, receipt_number")
-      .eq("business_id", ctx.businessId)
-      .eq("client_tx_id", cleanClientTxId)
-      .maybeSingle();
 
+  // Idempotency guard before starting transaction
+  if (cleanClientTxId) {
+    const existingRes = await dbQuery<{
+      id: string;
+      sale_number: number | null;
+      receipt_number: string | null;
+    }>(
+      `SELECT id, sale_number, receipt_number
+       FROM sales
+       WHERE business_id = $1 AND client_tx_id = $2
+       LIMIT 1`,
+      [ctx.businessId, cleanClientTxId]
+    );
+    const existingSale = existingRes.rows[0];
     if (existingSale?.id) {
       return {
         success: true,
@@ -493,115 +454,23 @@ export async function completePosSaleAction(payload: CompleteSalePayload) {
     }
   }
 
-  const sanitizedItems = payload.items.map((item) => ({
-    ...item,
-    quantity: Math.max(1, Math.round(Number(item.quantity) || 1)),
-    retailPricePaisa: Math.max(0, Math.round(Number(item.retailPricePaisa) || 0)),
-    costPricePaisa: Math.max(0, Math.round(Number(item.costPricePaisa) || 0)),
-  }));
-
-  // Aggregate demanded stock per inventory_items.id before writing anything
-  const demandedQtyByInvId = new Map<string, number>();
-  for (const item of sanitizedItems) {
-    if (item.productId) {
-      demandedQtyByInvId.set(
-        item.productId,
-        (demandedQtyByInvId.get(item.productId) ?? 0) + item.quantity
-      );
+  const sanitizedItems = payload.items.map((item) => {
+    const qty = Math.round(Number(item.quantity));
+    const unitPricePaisa = Math.round(Number(item.retailPricePaisa));
+    const unitCostPaisa = Math.round(Number(item.costPricePaisa) || 0);
+    if (!Number.isFinite(qty) || qty < 1) {
+      throw new Error(`Invalid quantity for "${item.name}".`);
     }
-  }
-
-  const invById = new Map<
-    string,
-    {
-      id: string;
-      name: string;
-      sku: string | null;
-      category: string | null;
-      stock_quantity: number;
-      cost_price_paisa: number;
-      retail_price_paisa: number;
-      min_stock_alert: number;
-      unit: string | null;
+    if (!Number.isFinite(unitPricePaisa) || unitPricePaisa <= 0) {
+      throw new Error(`Selling price for "${item.name}" must be greater than Rs. 0.`);
     }
-  >();
-
-  for (const [invId, demandedQty] of demandedQtyByInvId.entries()) {
-    const { data: inv, error: invErr } = await admin
-      .from("inventory_items")
-      .select(
-        "id, name, sku, category, stock_quantity, cost_price_paisa, retail_price_paisa, min_stock_alert, unit"
-      )
-      .eq("id", invId)
-      .eq("business_id", ctx.businessId)
-      .maybeSingle();
-
-    if (invErr || !inv) {
-      throw new Error("Selected inventory product no longer exists.");
-    }
-    const available = Number(inv.stock_quantity ?? 0);
-    if (available < demandedQty) {
-      throw new Error(
-        `Insufficient stock for ${inv.name}: requested ${demandedQty}, only ${available} in stock.`
-      );
-    }
-    invById.set(invId, {
-      id: String(inv.id),
-      name: String(inv.name),
-      sku: inv.sku ? String(inv.sku) : null,
-      category: inv.category ? String(inv.category) : "Accessories",
-      stock_quantity: available,
-      cost_price_paisa: Number(inv.cost_price_paisa ?? 0),
-      retail_price_paisa: Number(inv.retail_price_paisa ?? 0),
-      min_stock_alert: Number(inv.min_stock_alert ?? 5),
-      unit: inv.unit ? String(inv.unit) : "pcs",
-    });
-  }
-
-  const [{ data: activeSession }, { data: activeShift }, { data: activeTerminal }] =
-    await Promise.all([
-      admin
-        .from("cash_sessions")
-        .select("id, shift_id, expected_closing_paisa, status")
-        .eq("business_id", ctx.businessId)
-        .eq("status", "OPEN")
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle(),
-      admin
-        .from("shifts")
-        .select("id")
-        .eq("business_id", ctx.businessId)
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle(),
-      admin
-        .from("terminals")
-        .select("id")
-        .eq("business_id", ctx.businessId)
-        .limit(1)
-        .maybeSingle(),
-    ]);
-
-  const cashSessionId = activeSession?.id ? String(activeSession.id) : null;
-  const shiftId =
-    (activeSession?.shift_id ? String(activeSession.shift_id) : null) ??
-    (activeShift?.id ? String(activeShift.id) : null) ??
-    cashSessionId;
-  const terminalId = activeTerminal?.id ? String(activeTerminal.id) : null;
-  const soldBy = ctx.userId;
-
-  const { data: existingNums } = await admin
-    .from("sales")
-    .select("sale_number")
-    .eq("business_id", ctx.businessId)
-    .not("sale_number", "is", null)
-    .order("sale_number", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  const nextSaleNum = Number(existingNums?.sale_number ?? 0) + 1;
-  const receiptNumber = `REC-${String(nextSaleNum).padStart(5, "0")}`;
+    return {
+      ...item,
+      quantity: qty,
+      retailPricePaisa: unitPricePaisa,
+      costPricePaisa: Math.max(0, unitCostPaisa),
+    };
+  });
 
   const subtotalPaisa = sanitizedItems.reduce(
     (acc, i) => acc + i.retailPricePaisa * i.quantity,
@@ -611,44 +480,136 @@ export async function completePosSaleAction(payload: CompleteSalePayload) {
   const discountPaisa = Math.min(subtotalPaisa, rawDiscount);
   const totalPaisa = Math.max(0, subtotalPaisa - discountPaisa);
 
-  // Track rollback state so any failure cleanly reverts all changes
-  let createdSaleId: string | null = null;
-  const stockSnapshots: Array<{ invId: string; prevQty: number }> = [];
-  const lotSnapshots: LotSnapshot[] = [];
-
-  try {
-    const { data: saleRecord, error: saleErr } = await admin
-      .from("sales")
-      .insert({
-        business_id: ctx.businessId,
-        cash_session_id: cashSessionId,
-        shift_id: shiftId,
-        terminal_id: terminalId,
-        sold_by: soldBy,
-        client_tx_id: cleanClientTxId,
-        sale_number: nextSaleNum,
-        receipt_number: receiptNumber,
-        customer_name: payload.customerName.trim() || "Walk-in Customer",
-        subtotal_paisa: subtotalPaisa,
-        discount_paisa: discountPaisa,
-        tax_paisa: 0,
-        total_paisa: totalPaisa,
-        paid_paisa: totalPaisa,
-        currency: "PKR",
-        status: "POSTED",
-      })
-      .select("id")
-      .single();
-
-    if (saleErr || !saleRecord) {
-      throw new Error(`Failed to record sale: ${saleErr?.message}`);
+  const txResult = await withTransaction(async (client) => {
+    const demandedQtyByInvId = new Map<string, number>();
+    for (const item of sanitizedItems) {
+      if (item.productId) {
+        demandedQtyByInvId.set(
+          item.productId,
+          (demandedQtyByInvId.get(item.productId) ?? 0) + item.quantity
+        );
+      }
     }
 
-    createdSaleId = String(saleRecord.id);
+    const invById = new Map<string, InventoryRow>();
+    if (demandedQtyByInvId.size > 0) {
+      const ids = Array.from(demandedQtyByInvId.keys());
+      const { rows: invRows } = await client.query<{
+        id: string;
+        name: string;
+        sku: string | null;
+        category: string | null;
+        stock_quantity: string | number;
+        cost_price_paisa: string | number;
+        retail_price_paisa: string | number;
+        min_stock_alert: string | number | null;
+        unit: string | null;
+      }>(
+        `SELECT id, name, sku, category, stock_quantity, cost_price_paisa,
+                retail_price_paisa, min_stock_alert, unit
+         FROM inventory_items
+         WHERE business_id = $1 AND id = ANY($2::uuid[])
+         FOR UPDATE`,
+        [ctx.businessId, ids]
+      );
 
-    // Prorate discount across items proportionally so sum(line_total_paisa) === totalPaisa
+      for (const inv of invRows) {
+        invById.set(String(inv.id), {
+          id: String(inv.id),
+          name: String(inv.name),
+          sku: inv.sku ? String(inv.sku) : null,
+          category: inv.category ? String(inv.category) : "Accessories",
+          stock_quantity: Number(inv.stock_quantity ?? 0),
+          cost_price_paisa: Number(inv.cost_price_paisa ?? 0),
+          retail_price_paisa: Number(inv.retail_price_paisa ?? 0),
+          min_stock_alert: Number(inv.min_stock_alert ?? 5),
+          unit: inv.unit ? String(inv.unit) : "pcs",
+        });
+      }
+
+      for (const [invId, demandedQty] of demandedQtyByInvId.entries()) {
+        const inv = invById.get(invId);
+        if (!inv) {
+          throw new Error("Selected inventory product no longer exists.");
+        }
+        if (inv.stock_quantity < demandedQty) {
+          throw new Error(
+            `Insufficient stock for ${inv.name}: requested ${demandedQty}, only ${inv.stock_quantity} in stock.`
+          );
+        }
+      }
+    }
+
+    const [sessionRes, shiftRes, terminalRes, maxNumRes] = await Promise.all([
+      client.query<{
+        id: string;
+        shift_id: string | null;
+        expected_closing_paisa: string | number;
+        status: string;
+      }>(
+        `SELECT id, shift_id, expected_closing_paisa, status
+         FROM cash_sessions
+         WHERE business_id = $1 AND status = 'OPEN'
+         ORDER BY created_at DESC
+         LIMIT 1
+         FOR UPDATE`,
+        [ctx.businessId]
+      ),
+      client.query<{ id: string }>(
+        `SELECT id FROM shifts WHERE business_id = $1 ORDER BY created_at DESC LIMIT 1`,
+        [ctx.businessId]
+      ),
+      client.query<{ id: string }>(
+        `SELECT id FROM terminals WHERE business_id = $1 LIMIT 1`,
+        [ctx.businessId]
+      ),
+      client.query<{ max_num: string | number | null }>(
+        `SELECT COALESCE(MAX(sale_number), 0) AS max_num FROM sales WHERE business_id = $1`,
+        [ctx.businessId]
+      ),
+    ]);
+
+    const activeSession = sessionRes.rows[0] ?? null;
+    const cashSessionId = activeSession?.id ? String(activeSession.id) : null;
+    const shiftId =
+      (activeSession?.shift_id ? String(activeSession.shift_id) : null) ??
+      (shiftRes.rows[0]?.id ? String(shiftRes.rows[0].id) : null) ??
+      cashSessionId;
+    const terminalId = terminalRes.rows[0]?.id ? String(terminalRes.rows[0].id) : null;
+    const soldBy = ctx.userId;
+
+    const nextSaleNum = Number(maxNumRes.rows[0]?.max_num ?? 0) + 1;
+    const receiptNumber = `REC-${String(nextSaleNum).padStart(5, "0")}`;
+
+    const saleInsert = await client.query<{ id: string }>(
+      `INSERT INTO sales (
+         business_id, cash_session_id, shift_id, terminal_id, sold_by,
+         client_tx_id, sale_number, receipt_number, customer_name,
+         subtotal_paisa, discount_paisa, tax_paisa, total_paisa, paid_paisa,
+         currency, status
+       )
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 0, $12, $13, 'PKR', 'POSTED')
+       RETURNING id`,
+      [
+        ctx.businessId,
+        cashSessionId,
+        shiftId,
+        terminalId,
+        soldBy,
+        cleanClientTxId,
+        nextSaleNum,
+        receiptNumber,
+        payload.customerName.trim() || "Walk-in Customer",
+        subtotalPaisa,
+        discountPaisa,
+        totalPaisa,
+        totalPaisa,
+      ]
+    );
+
+    const createdSaleId = String(saleInsert.rows[0].id);
+
     let discountRemaining = discountPaisa;
-
     for (let idx = 0; idx < sanitizedItems.length; idx++) {
       const item = sanitizedItems[idx];
       const grossLine = item.retailPricePaisa * item.quantity;
@@ -667,176 +628,136 @@ export async function completePosSaleAction(payload: CompleteSalePayload) {
 
       if (item.productId) {
         const inv = invById.get(item.productId)!;
-        const linkedProductId = await resolveOrCreateProductId(
-          admin,
-          ctx.businessId,
-          inv
-        );
+        const linkedProductId = await resolveOrCreateProductId(client, ctx.businessId, inv);
 
         const fifoRes = await consumeFifoLots(
-          admin,
+          client,
           ctx.businessId,
           linkedProductId,
           item.quantity,
-          inv.cost_price_paisa || item.costPricePaisa,
-          lotSnapshots
+          inv.cost_price_paisa || item.costPricePaisa
         );
 
-        // Snapshot previous stock before deducting
-        if (!stockSnapshots.some((s) => s.invId === inv.id)) {
-          stockSnapshots.push({ invId: inv.id, prevQty: inv.stock_quantity });
-        }
         const nextStockQty = Math.max(0, inv.stock_quantity - item.quantity);
         inv.stock_quantity = nextStockQty;
 
-        const { error: stockErr } = await admin
-          .from("inventory_items")
-          .update({ stock_quantity: nextStockQty })
-          .eq("id", inv.id)
-          .eq("business_id", ctx.businessId);
-        if (stockErr) {
-          throw new Error(
-            `Failed to update stock for ${item.name}: ${stockErr.message}`
-          );
-        }
+        await client.query(
+          `UPDATE inventory_items
+           SET stock_quantity = $1, updated_at = NOW()
+           WHERE id = $2 AND business_id = $3`,
+          [nextStockQty, inv.id, ctx.businessId]
+        );
 
-        const { error: lineErr } = await admin.from("sale_items").insert({
-          business_id: ctx.businessId,
-          sale_id: createdSaleId,
-          item_kind: "PRODUCT",
-          product_id: linkedProductId,
-          service_id: null,
-          description: item.name,
-          item_name: item.name,
-          category_name: inv.category || item.category || "Accessories",
-          quantity: item.quantity,
-          unit_price_paisa: item.retailPricePaisa,
-          discount_paisa: lineDiscount,
-          line_total_paisa: lineTotal,
-          total_paisa: lineTotal,
-          unit_cost_snapshot_paisa: fifoRes.unitCostPaisa,
-          cost_price_paisa: fifoRes.unitCostPaisa,
-          currency: "PKR",
-        });
+        await client.query(
+          `INSERT INTO sale_items (
+             business_id, sale_id, item_kind, product_id, service_id,
+             description, item_name, category_name, quantity,
+             unit_price_paisa, discount_paisa, line_total_paisa, total_paisa,
+             unit_cost_snapshot_paisa, cost_price_paisa, currency
+           )
+           VALUES ($1, $2, 'PRODUCT', $3, NULL, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 'PKR')`,
+          [
+            ctx.businessId,
+            createdSaleId,
+            linkedProductId,
+            item.name,
+            item.name,
+            inv.category || item.category || "Accessories",
+            item.quantity,
+            item.retailPricePaisa,
+            lineDiscount,
+            lineTotal,
+            lineTotal,
+            fifoRes.unitCostPaisa,
+            fifoRes.unitCostPaisa,
+          ]
+        );
 
-        if (lineErr) {
-          throw new Error(
-            `Failed to record sale line (${item.name}): ${lineErr.message}`
-          );
-        }
-
-        await admin.from("stock_movements").insert({
-          business_id: ctx.businessId,
-          product_id: linkedProductId,
-          inventory_lot_id: fifoRes.firstLotId,
-          movement_type: "SALE_OUT",
-          quantity_delta: -item.quantity,
-          unit_cost_paisa: fifoRes.unitCostPaisa,
-          reference_type: "sales",
-          reference_id: createdSaleId,
-          created_by: soldBy,
-        });
+        await client.query(
+          `INSERT INTO stock_movements (
+             business_id, product_id, inventory_lot_id, movement_type,
+             quantity_delta, unit_cost_paisa, reference_type, reference_id, created_by
+           )
+           VALUES ($1, $2, $3, 'SALE_OUT', $4, $5, 'sales', $6, $7)`,
+          [
+            ctx.businessId,
+            linkedProductId,
+            fifoRes.firstLotId,
+            -item.quantity,
+            fifoRes.unitCostPaisa,
+            createdSaleId,
+            soldBy,
+          ]
+        );
       } else {
         const resolvedServiceId = await resolveOrCreateServiceId(
-          admin,
+          client,
           ctx.businessId,
           item.category || "Services",
           item.name
         );
 
-        const { error: lineErr } = await admin.from("sale_items").insert({
-          business_id: ctx.businessId,
-          sale_id: createdSaleId,
-          item_kind: resolvedServiceId ? "SERVICE" : "CUSTOM",
-          product_id: null,
-          service_id: resolvedServiceId,
-          description: item.name,
-          item_name: item.name,
-          category_name: item.category || "Services",
-          quantity: item.quantity,
-          unit_price_paisa: item.retailPricePaisa,
-          discount_paisa: lineDiscount,
-          line_total_paisa: lineTotal,
-          total_paisa: lineTotal,
-          unit_cost_snapshot_paisa: item.costPricePaisa,
-          cost_price_paisa: item.costPricePaisa,
-          currency: "PKR",
-        });
-
-        if (lineErr) {
-          throw new Error(
-            `Failed to record sale line (${item.name}): ${lineErr.message}`
-          );
-        }
+        await client.query(
+          `INSERT INTO sale_items (
+             business_id, sale_id, item_kind, product_id, service_id,
+             description, item_name, category_name, quantity,
+             unit_price_paisa, discount_paisa, line_total_paisa, total_paisa,
+             unit_cost_snapshot_paisa, cost_price_paisa, currency
+           )
+           VALUES ($1, $2, $3, NULL, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, 'PKR')`,
+          [
+            ctx.businessId,
+            createdSaleId,
+            resolvedServiceId ? "SERVICE" : "CUSTOM",
+            resolvedServiceId,
+            item.name,
+            item.name,
+            item.category || "Services",
+            item.quantity,
+            item.retailPricePaisa,
+            lineDiscount,
+            lineTotal,
+            lineTotal,
+            item.costPricePaisa,
+            item.costPricePaisa,
+          ]
+        );
       }
     }
 
     if (totalPaisa > 0) {
-      const { error: payErr } = await admin.from("payments").insert({
-        business_id: ctx.businessId,
-        sale_id: createdSaleId,
-        cash_session_id: cashSessionId,
-        method: normalizedMethod,
-        amount_paisa: totalPaisa,
-        currency: "PKR",
-        status: "COMPLETED",
-        received_by: soldBy,
-      });
+      await client.query(
+        `INSERT INTO payments (
+           business_id, sale_id, cash_session_id, method,
+           amount_paisa, currency, status, received_by
+         )
+         VALUES ($1, $2, $3, $4, $5, 'PKR', 'COMPLETED', $6)`,
+        [ctx.businessId, createdSaleId, cashSessionId, normalizedMethod, totalPaisa, soldBy]
+      );
 
-      if (payErr) {
-        throw new Error(`Failed to record payment: ${payErr.message}`);
-      }
-
-      if (
-        normalizedMethod === "CASH" &&
-        activeSession &&
-        activeSession.status === "OPEN"
-      ) {
+      if (normalizedMethod === "CASH" && activeSession && activeSession.status === "OPEN") {
         const nextExpected =
           Number(activeSession.expected_closing_paisa ?? 0) + totalPaisa;
-        await admin
-          .from("cash_sessions")
-          .update({ expected_closing_paisa: nextExpected })
-          .eq("id", activeSession.id);
+        await client.query(
+          `UPDATE cash_sessions SET expected_closing_paisa = $1 WHERE id = $2`,
+          [nextExpected, activeSession.id]
+        );
       }
     }
-  } catch (err) {
-    // Compensating rollback so zero partial sales or deducted stock remain on error
-    for (const snap of stockSnapshots) {
-      await admin
-        .from("inventory_items")
-        .update({ stock_quantity: snap.prevQty })
-        .eq("id", snap.invId)
-        .eq("business_id", ctx.businessId);
-    }
-    for (const lotSnap of [...lotSnapshots].reverse()) {
-      await admin
-        .from("inventory_lots")
-        .update({
-          remaining_qty: lotSnap.prevRemainingQty,
-          status: lotSnap.prevStatus,
-        })
-        .eq("id", lotSnap.lotId);
-    }
-    if (createdSaleId) {
-      await admin.from("stock_movements").delete().eq("reference_id", createdSaleId);
-      await admin.from("payments").delete().eq("sale_id", createdSaleId);
-      await admin.from("sale_items").delete().eq("sale_id", createdSaleId);
-      await admin.from("sales").delete().eq("id", createdSaleId);
-    }
-    throw err;
-  }
+
+    return { createdSaleId, nextSaleNum, receiptNumber };
+  });
 
   await writeAuditLog({
     businessId: ctx.businessId,
     actorName: ctx.fullName,
     actionType: "POS_SALE_COMPLETED",
-    description: `Sale ${receiptNumber} completed (${normalizedMethod}) for Rs. ${Math.round(
+    description: `Sale ${txResult.receiptNumber} completed (${normalizedMethod}) for Rs. ${Math.round(
       totalPaisa / 100
     )}`,
     metadata: {
-      sale_id: createdSaleId,
-      receipt_number: receiptNumber,
+      sale_id: txResult.createdSaleId,
+      receipt_number: txResult.receiptNumber,
       payment_method: normalizedMethod,
       total_paisa: totalPaisa,
       discount_paisa: discountPaisa,
@@ -855,9 +776,9 @@ export async function completePosSaleAction(payload: CompleteSalePayload) {
 
   return {
     success: true,
-    saleNumber: nextSaleNum,
-    saleId: createdSaleId,
-    receiptNumber,
+    saleNumber: txResult.nextSaleNum,
+    saleId: txResult.createdSaleId,
+    receiptNumber: txResult.receiptNumber,
     duplicatePrevented: false,
   };
 }

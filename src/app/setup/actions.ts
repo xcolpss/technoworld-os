@@ -1,220 +1,145 @@
-﻿"use server";
+"use server";
 
+import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { createSupabaseServerClient } from "@/lib/supabase/server";
-import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import {
+  AUTH_COOKIE_NAME,
+  PERSISTENCE_COOKIE_NAME,
+} from "@/lib/auth/cookie-persistence";
+import { revokeLocalAuthSession } from "@/lib/auth/local-auth";
+import { getAuthenticatedShopContext } from "@/lib/auth/session";
+import { withTransaction } from "@/lib/db/pool";
 
 export async function signOutAction() {
-  const supabase = await createSupabaseServerClient();
-  await supabase.auth.signOut();
-  redirect("/login");
+  const cookieStore = await cookies();
+  const token = cookieStore.get(AUTH_COOKIE_NAME)?.value;
+  await revokeLocalAuthSession(token);
+  cookieStore.delete(AUTH_COOKIE_NAME);
+  cookieStore.delete(PERSISTENCE_COOKIE_NAME);
+  redirect("/login?reason=signed_out");
 }
 
 export async function initializeBusinessAction(formData: FormData) {
-  const supabase = await createSupabaseServerClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) {
+  const ctx = await getAuthenticatedShopContext();
+  if (!ctx) {
     redirect("/login");
   }
 
   const businessName =
-    String(formData.get("businessName") || "TechnoWorld").trim() || "TechnoWorld";
+    String(formData.get("businessName") || "TechnoWorld").trim() ||
+    "TechnoWorld";
   const ownerFullName =
     String(formData.get("ownerFullName") || "").trim() ||
-    user.email?.split("@")[0] ||
+    ctx.fullName ||
+    ctx.email.split("@")[0] ||
     "Owner";
-  const city = String(formData.get("city") || "Rawalpindi").trim() || "Rawalpindi";
+  const city =
+    String(formData.get("city") || "Rawalpindi").trim() || "Rawalpindi";
 
-  const admin = createSupabaseAdminClient();
+  const alreadyRedirect = await withTransaction(async (client) => {
+    await client.query(
+      `INSERT INTO public.profiles (id, full_name, email, status)
+       VALUES ($1, $2, $3, 'ACTIVE')
+       ON CONFLICT (id) DO UPDATE SET full_name = EXCLUDED.full_name, email = EXCLUDED.email`,
+      [ctx.userId, ownerFullName, ctx.email || null]
+    );
 
-  // 1. Upsert user profile
-  const { error: profileError } = await admin.from("profiles").upsert({
-    id: user.id,
-    full_name: ownerFullName,
-    email: user.email ?? null,
-    status: "ACTIVE",
+    const existingMembership = await client.query<{ id: string }>(
+      `SELECT id FROM public.memberships WHERE profile_id = $1 AND status = 'ACTIVE' LIMIT 1`,
+      [ctx.userId]
+    );
+    if ((existingMembership.rowCount ?? 0) > 0) {
+      return true;
+    }
+
+    const bizRes = await client.query<{ id: string }>(
+      `INSERT INTO public.businesses (name, city, country, default_currency, timezone, status)
+       VALUES ($1, $2, 'Pakistan', 'PKR', 'Asia/Karachi', 'ACTIVE')
+       RETURNING id`,
+      [businessName, city]
+    );
+    const businessId = bizRes.rows[0].id;
+
+    const rolesRes = await client.query<{ id: string; code: string }>(
+      `INSERT INTO public.roles (business_id, code, name, description, is_system)
+       VALUES
+         ($1, 'OWNER', 'Owner', 'Full administrative, operational, and confidential capital access', true),
+         ($1, 'MANAGER', 'Manager', 'Configurable operational, inventory, and shift supervision access', true),
+         ($1, 'EMPLOYEE', 'Employee', 'Counter POS, permitted refunds/discounts, expenses, and own shift access', true)
+       RETURNING id, code`,
+      [businessId]
+    );
+
+    const ownerRole = rolesRes.rows.find((r) => r.code === "OWNER");
+    if (!ownerRole) {
+      throw new Error("OWNER role creation failed.");
+    }
+
+    await client.query(
+      `INSERT INTO public.memberships (business_id, profile_id, role_id, status)
+       VALUES ($1, $2, $3, 'ACTIVE')`,
+      [businessId, ctx.userId, ownerRole.id]
+    );
+
+    await client.query(
+      `INSERT INTO public.owners (business_id, profile_id, display_name, equity_share_bps, status)
+       VALUES ($1, $2, $3, 10000, 'ACTIVE')`,
+      [businessId, ctx.userId, ownerFullName]
+    );
+
+    const termRes = await client.query<{ id: string; code: string }>(
+      `INSERT INTO public.terminals (business_id, code, name, location_label, has_receipt_printer, has_cash_drawer, status)
+       VALUES
+         ($1, 'PC-01', 'Main Counter PC-01', 'Front POS & 80mm Receipt Printer', true, true, 'ACTIVE'),
+         ($1, 'PC-02', 'Service Desk PC-02', 'Printing, Forms & Media Station', false, false, 'ACTIVE'),
+         ($1, 'PC-03', 'Editing & Repair PC-03', 'Photo/Video Editing & Tech Bench', false, false, 'ACTIVE')
+       RETURNING id, code`,
+      [businessId]
+    );
+
+    await client.query(
+      `INSERT INTO public.business_settings (business_id, morning_shift_start, morning_shift_end, evening_shift_start, evening_shift_end, require_shift_open_for_sales, allow_negative_stock, tax_enabled, default_tax_bps)
+       VALUES ($1, '08:00:00', '16:00:00', '16:00:00', '00:00:00', true, false, false, 0)`,
+      [businessId]
+    );
+
+    await client.query(
+      `INSERT INTO public.receipt_settings (business_id, header_title, header_subtitle, address_line, footer_message, show_cashier_name, show_terminal_code)
+       VALUES ($1, $2, 'Retail & Computer Services', $3, 'Thank you for visiting TechnoWorld!', true, true)`,
+      [businessId, businessName, city]
+    );
+
+    const mainTerminal = termRes.rows.find((t) => t.code === "PC-01");
+    if (mainTerminal) {
+      await client.query(
+        `INSERT INTO public.printer_settings (business_id, terminal_id, paper_width_mm, connection_type, auto_cut_paper, kick_cash_drawer_on_cash_sale)
+         VALUES ($1, $2, 80, 'USB', true, true)`,
+        [businessId, mainTerminal.id]
+      );
+    }
+
+    await client.query(
+      `INSERT INTO public.notification_settings (business_id, notify_low_stock, notify_cash_discrepancy, notify_large_refund, large_refund_threshold_paisa)
+       VALUES ($1, true, true, true, 500000)`,
+      [businessId]
+    );
+
+    await client.query(
+      `INSERT INTO public.audit_logs (business_id, actor_name, action_type, description, metadata)
+       VALUES ($1, $2, 'BUSINESS_INITIALIZED', $3, $4::jsonb)`,
+      [
+        businessId,
+        ownerFullName,
+        `Initialized business ${businessName}`,
+        JSON.stringify({ name: businessName, city, currency: "PKR", timezone: "Asia/Karachi" }),
+      ]
+    );
+
+    return false;
   });
-  if (profileError) {
-    throw new Error(`Failed to create profile: ${profileError.message}`);
-  }
 
-  // Check if user already has an active membership
-  const { data: existingMembership } = await admin
-    .from("memberships")
-    .select("id")
-    .eq("profile_id", user.id)
-    .eq("status", "ACTIVE")
-    .maybeSingle();
-
-  if (existingMembership) {
+  if (alreadyRedirect) {
     redirect("/dashboard");
   }
-
-  // 2. Create Business
-  const { data: business, error: bizError } = await admin
-    .from("businesses")
-    .insert({
-      name: businessName,
-      city,
-      country: "Pakistan",
-      default_currency: "PKR",
-      timezone: "Asia/Karachi",
-      status: "ACTIVE",
-    })
-    .select("id")
-    .single();
-
-  if (bizError || !business) {
-    throw new Error(`Failed to create business: ${bizError?.message}`);
-  }
-
-  // 3. Create System Roles (OWNER, MANAGER, EMPLOYEE)
-  const { data: createdRoles, error: rolesError } = await admin
-    .from("roles")
-    .insert([
-      {
-        business_id: business.id,
-        code: "OWNER",
-        name: "Owner",
-        description: "Full administrative, operational, and confidential capital access",
-        is_system: true,
-      },
-      {
-        business_id: business.id,
-        code: "MANAGER",
-        name: "Manager",
-        description: "Configurable operational, inventory, and shift supervision access",
-        is_system: true,
-      },
-      {
-        business_id: business.id,
-        code: "EMPLOYEE",
-        name: "Employee",
-        description: "Counter POS, permitted refunds/discounts, expenses, and own shift access",
-        is_system: true,
-      },
-    ])
-    .select("id, code");
-
-  if (rolesError || !createdRoles) {
-    throw new Error(`Failed to create roles: ${rolesError?.message}`);
-  }
-
-  const ownerRole = createdRoles.find((r) => r.code === "OWNER");
-  if (!ownerRole) {
-    throw new Error("OWNER role creation failed.");
-  }
-
-  // 4. Create Owner Membership & Confidential Owner Capital Profile
-  await admin.from("memberships").insert({
-    business_id: business.id,
-    profile_id: user.id,
-    role_id: ownerRole.id,
-    status: "ACTIVE",
-  });
-
-  await admin.from("owners").insert({
-    business_id: business.id,
-    profile_id: user.id,
-    display_name: ownerFullName,
-    equity_share_bps: 10000,
-    status: "ACTIVE",
-  });
-
-  // 5. Create the 3 Shop Terminals (Computers)
-  const { data: terminals } = await admin
-    .from("terminals")
-    .insert([
-      {
-        business_id: business.id,
-        code: "PC-01",
-        name: "Main Counter PC-01",
-        location_label: "Front POS & 80mm Receipt Printer",
-        has_receipt_printer: true,
-        has_cash_drawer: true,
-        status: "ACTIVE",
-      },
-      {
-        business_id: business.id,
-        code: "PC-02",
-        name: "Service Desk PC-02",
-        location_label: "Printing, Forms & Media Station",
-        has_receipt_printer: false,
-        has_cash_drawer: false,
-        status: "ACTIVE",
-      },
-      {
-        business_id: business.id,
-        code: "PC-03",
-        name: "Editing & Repair PC-03",
-        location_label: "Photo/Video Editing & Tech Bench",
-        has_receipt_printer: false,
-        has_cash_drawer: false,
-        status: "ACTIVE",
-      },
-    ])
-    .select("id, code");
-
-  // 6. Initialize Default Settings
-  await admin.from("business_settings").insert({
-    business_id: business.id,
-    morning_shift_start: "08:00:00",
-    morning_shift_end: "16:00:00",
-    evening_shift_start: "16:00:00",
-    evening_shift_end: "00:00:00",
-    require_shift_open_for_sales: true,
-    allow_negative_stock: false,
-    tax_enabled: false,
-    default_tax_bps: 0,
-  });
-
-  await admin.from("receipt_settings").insert({
-    business_id: business.id,
-    header_title: businessName,
-    header_subtitle: "Retail & Computer Services",
-    address_line: city,
-    footer_message: "Thank you for visiting TechnoWorld!",
-    show_cashier_name: true,
-    show_terminal_code: true,
-  });
-
-  const mainTerminal = terminals?.find((t) => t.code === "PC-01");
-  if (mainTerminal) {
-    await admin.from("printer_settings").insert({
-      business_id: business.id,
-      terminal_id: mainTerminal.id,
-      paper_width_mm: 80,
-      connection_type: "USB",
-      auto_cut_paper: true,
-      kick_cash_drawer_on_cash_sale: true,
-    });
-  }
-
-  await admin.from("notification_settings").insert({
-    business_id: business.id,
-    notify_low_stock: true,
-    notify_cash_discrepancy: true,
-    notify_large_refund: true,
-    large_refund_threshold_paisa: 500000,
-  });
-
-  // 7. Record Immutable Audit Log Entry
-  await admin.from("audit_logs").insert({
-    business_id: business.id,
-    actor_profile_id: user.id,
-    action: "BUSINESS_INITIALIZED",
-    entity_type: "businesses",
-    entity_id: business.id,
-    after_state: {
-      name: businessName,
-      city,
-      currency: "PKR",
-      timezone: "Asia/Karachi",
-    },
-  });
-
   redirect("/dashboard");
 }

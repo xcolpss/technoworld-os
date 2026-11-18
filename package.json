@@ -5,21 +5,26 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start",
-    "lint": "eslint ."
+    "start": "bun scripts/start.mjs",
+    "lint": "eslint .",
+    "db:migrate": "bun scripts/migrate.mjs",
+    "db:backup": "bun scripts/backup.mjs",
+    "db:restore": "bun scripts/restore.mjs"
   },
   "dependencies": {
-    "@supabase/ssr": "^0.5.2",
-    "@supabase/supabase-js": "^2.48.0",
+    "@embedded-postgres/windows-x64": "17.11.0-beta.19",
+    "@tanstack/react-query": "^5.108.0",
     "clsx": "^2.1.1",
     "lucide-react": "^0.469.0",
     "next": "^16.4.6",
+    "pg": "^8.23.1",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "tailwind-merge": "^2.6.0"
   },
   "devDependencies": {
     "@types/node": "^20",
+    "@types/pg": "^8.23.1",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "autoprefixer": "^10.4.19",

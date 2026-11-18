@@ -1,4 +1,4 @@
-import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import { dbQuery } from "@/lib/db/pool";
 
 export interface AuditLogInput {
   businessId: string;
@@ -10,14 +10,17 @@ export interface AuditLogInput {
 
 export async function writeAuditLog(input: AuditLogInput): Promise<void> {
   try {
-    const admin = createSupabaseAdminClient();
-    await admin.from("audit_logs").insert({
-      business_id: input.businessId,
-      actor_name: input.actorName,
-      action_type: input.actionType,
-      description: input.description,
-      metadata: input.metadata ?? {},
-    });
+    await dbQuery(
+      `INSERT INTO public.audit_logs (business_id, actor_name, action_type, description, metadata)
+       VALUES ($1, $2, $3, $4, $5::jsonb)`,
+      [
+        input.businessId,
+        input.actorName,
+        input.actionType,
+        input.description,
+        JSON.stringify(input.metadata ?? {}),
+      ]
+    );
   } catch {
     // Non-blocking audit trail write
   }

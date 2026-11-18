@@ -1,20 +1,25 @@
 "use client";
 
 import * as React from "react";
+import Link from "next/link";
 import {
   AlertOctagon,
+  AlertTriangle,
   Ban,
   Banknote,
   Calendar,
   CheckCircle2,
   ChevronDown,
   ChevronUp,
+  ClipboardCheck,
   Edit3,
   Eye,
+  FileText,
   Minus,
   Plus,
   Printer,
   Receipt,
+  RotateCcw,
   Save,
   Search,
   Smartphone,
@@ -40,6 +45,45 @@ import type {
   EditableSaleLine,
   UpdateSalePayload,
 } from "@/app/(workspace)/sales/actions";
+import type { ClosingShiftLabel } from "@/app/(workspace)/dashboard/closing/actions";
+import type { UserRole } from "@/types/system";
+
+const CLOSING_SHIFT_LABELS: Record<ClosingShiftLabel, string> = {
+  FULL_DAY: "Full Day",
+  MORNING: "Morning Shift",
+  EVENING: "Evening Shift",
+  NIGHT: "Night Shift",
+};
+
+export interface SavedClosingRecord {
+  id: string;
+  closing_date: string;
+  shift_label: ClosingShiftLabel;
+  replaces_closing_id: string | null;
+  status: "SAVED" | "VOIDED";
+  morning_cash_paisa: number;
+  evening_cash_paisa: number;
+  night_cash_paisa: number;
+  cash_collected_paisa: number;
+  digital_sales_paisa: number;
+  gross_sales_paisa: number;
+  refunds_paisa: number;
+  net_sales_paisa: number;
+  total_expenses_paisa: number;
+  total_wages_paisa: number;
+  expected_closing_paisa: number;
+  actual_closing_paisa: number;
+  cash_variance_paisa: number;
+  expenses_json: Array<Record<string, unknown>>;
+  wages_json: Array<Record<string, unknown>>;
+  notes: string;
+  prepared_by_name: string | null;
+  void_reason: string | null;
+  voided_by_name: string | null;
+  voided_at_iso: string | null;
+  created_at_iso: string;
+  updated_at_iso: string;
+}
 
 export interface CatalogPickerOption {
   id: string;
@@ -82,22 +126,36 @@ export interface SaleRecord {
 
 interface SalesHistoryManagerProps {
   sales: SaleRecord[];
+  closings?: SavedClosingRecord[];
   catalogOptions: CatalogPickerOption[];
   todayPk: string;
+  userRole?: UserRole;
   onVoidSale: (saleId: string) => Promise<void>;
   onUpdateSale: (payload: UpdateSalePayload) => Promise<void>;
+  onVoidClosing?: (payload: {
+    closingId: string;
+    closingDate: string;
+    shiftLabel: ClosingShiftLabel;
+    reason: string;
+  }) => Promise<void>;
 }
 
 export function SalesHistoryManager({
   sales,
+  closings = [],
   catalogOptions,
   todayPk,
+  userRole = "OWNER",
   onVoidSale,
   onUpdateSale,
+  onVoidClosing,
 }: SalesHistoryManagerProps) {
   const [dateScope, setDateScope] = React.useState<"TODAY" | "ALL" | "CUSTOM">(
     "TODAY"
   );
+  const [recordTypeFilter, setRecordTypeFilter] = React.useState<
+    "ALL" | "SALES" | "CLOSINGS"
+  >("ALL");
   const [customDate, setCustomDate] = React.useState(todayPk);
   const [paymentFilter, setPaymentFilter] = React.useState<string>("ALL");
   const [auditFilter, setAuditFilter] = React.useState<
@@ -108,6 +166,16 @@ export function SalesHistoryManager({
     sales[0]?.id ?? null
   );
   const [reprintSale, setReprintSale] = React.useState<SaleRecord | null>(null);
+  const [viewingClosing, setViewingClosing] =
+    React.useState<SavedClosingRecord | null>(null);
+  const [voidClosingTarget, setVoidClosingTarget] =
+    React.useState<SavedClosingRecord | null>(null);
+  const [voidClosingReason, setVoidClosingReason] = React.useState("");
+  const [voidClosingError, setVoidClosingError] = React.useState<string | null>(
+    null
+  );
+  const [isVoidingClosing, setIsVoidingClosing] = React.useState(false);
+  const canVoidClosing = userRole === "OWNER" || userRole === "MANAGER";
   const [paperWidth, setPaperWidth] = useThermalPaperWidth();
   const pendingReprintRef = React.useRef(false);
   const [statusBanner, setStatusBanner] = React.useState<string | null>(null);
@@ -331,6 +399,87 @@ export function SalesHistoryManager({
   const bankPaisa = activeSales
     .filter((s) => s.payment_method === "BANK_TRANSFER")
     .reduce((sum, s) => sum + s.total_paisa, 0);
+
+  const activeClosingSlots = React.useMemo(() => {
+    const set = new Set<string>();
+    for (const c of closings) {
+      if (c.status !== "VOIDED") {
+        set.add(`${c.closing_date}:${c.shift_label}`);
+      }
+    }
+    return set;
+  }, [closings]);
+
+  const dateScopedClosings = closings.filter((c) => {
+    if (dateScope === "TODAY" && c.closing_date !== todayPk) return false;
+    if (dateScope === "CUSTOM" && customDate && c.closing_date !== customDate) {
+      return false;
+    }
+    return true;
+  });
+
+  const filteredClosings = dateScopedClosings.filter((c) => {
+    const isVoided = c.status === "VOIDED";
+    if (auditFilter === "VOIDED" && !isVoided) return false;
+    if (auditFilter === "EDITED" && !c.replaces_closing_id) return false;
+    if (auditFilter === "FLAGGED" && !isVoided && !c.replaces_closing_id) {
+      return false;
+    }
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      const shiftText = (
+        CLOSING_SHIFT_LABELS[c.shift_label] ?? c.shift_label
+      ).toLowerCase();
+      const matches =
+        "daily closing".includes(q) ||
+        c.closing_date.toLowerCase().includes(q) ||
+        shiftText.includes(q) ||
+        c.notes.toLowerCase().includes(q) ||
+        (c.prepared_by_name ?? "").toLowerCase().includes(q) ||
+        (c.void_reason ?? "").toLowerCase().includes(q);
+      if (!matches) return false;
+    }
+    return true;
+  });
+
+  async function handleConfirmVoidClosing(e: React.FormEvent) {
+    e.preventDefault();
+    if (!voidClosingTarget || !onVoidClosing) return;
+    const trimmedReason = voidClosingReason.trim();
+    if (!trimmedReason) {
+      setVoidClosingError("Please enter a reason for voiding this closing.");
+      return;
+    }
+    setVoidClosingError(null);
+    setIsVoidingClosing(true);
+    try {
+      const target = voidClosingTarget;
+      await onVoidClosing({
+        closingId: target.id,
+        closingDate: target.closing_date,
+        shiftLabel: target.shift_label,
+        reason: trimmedReason,
+      });
+      setStatusBanner(
+        `Daily Closing for ${target.closing_date} (${CLOSING_SHIFT_LABELS[target.shift_label]}) marked as VOIDED. Original record is preserved; you can create a replacement closing now.`
+      );
+      if (viewingClosing?.id === target.id) {
+        setViewingClosing({
+          ...target,
+          status: "VOIDED",
+          void_reason: trimmedReason,
+        });
+      }
+      setVoidClosingTarget(null);
+      setVoidClosingReason("");
+    } catch (err) {
+      setVoidClosingError(
+        err instanceof Error ? err.message : "Failed to void daily closing."
+      );
+    } finally {
+      setIsVoidingClosing(false);
+    }
+  }
 
   function triggerThermalReprint(sale: SaleRecord) {
     pendingReprintRef.current = true;
@@ -576,6 +725,29 @@ export function SalesHistoryManager({
             <option value="EASYPAISA">EasyPaisa</option>
             <option value="BANK_TRANSFER">Bank Transfer</option>
           </select>
+
+          <div className="flex rounded-xl border border-border bg-warm p-1">
+            {(
+              [
+                { id: "ALL", label: "All Records" },
+                { id: "SALES", label: `Bills (${filteredSales.length})` },
+                { id: "CLOSINGS", label: `Closings (${filteredClosings.length})` },
+              ] as const
+            ).map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setRecordTypeFilter(tab.id)}
+                className={`rounded-lg px-2.5 py-1 text-xs font-bold transition ${
+                  recordTypeFilter === tab.id
+                    ? "bg-brand text-white shadow-xs"
+                    : "text-muted hover:text-ink"
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
         </div>
 
         <div className="relative w-full sm:w-auto flex-1 min-w-0 sm:min-w-[200px] sm:max-w-xs">
@@ -583,14 +755,242 @@ export function SalesHistoryManager({
           <Input
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search invoice #, customer, or item..."
+            placeholder="Search invoice #, closing, customer, or item..."
             className="h-9 pl-9 text-xs"
           />
         </div>
       </div>
 
+      {/* 2B. Saved Daily Closings (Distinguished from Ordinary Sales Bills) */}
+      {recordTypeFilter !== "SALES" &&
+        (filteredClosings.length > 0 || recordTypeFilter === "CLOSINGS") && (
+          <div className="space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <ClipboardCheck className="h-4 w-4 text-indigo-500" />
+                <h2 className="text-sm font-extrabold uppercase tracking-wider text-ink">
+                  Saved Daily Closings ({filteredClosings.length})
+                </h2>
+              </div>
+              <Link
+                href="/dashboard/closing"
+                className="text-xs font-bold text-brand hover:underline"
+              >
+                + Open Daily Closing Sheet
+              </Link>
+            </div>
+
+            {filteredClosings.length === 0 ? (
+              <Card className="border-indigo-500/30 bg-indigo-500/5">
+                <CardContent className="p-8 text-center space-y-2">
+                  <FileText className="mx-auto h-7 w-7 text-indigo-400" />
+                  <p className="text-sm font-bold text-ink">
+                    No saved Daily Closings in this date range
+                  </p>
+                  <p className="text-xs text-muted">
+                    Save a closing on the Daily Closing sheet or switch to{" "}
+                    <strong>All History</strong> above.
+                  </p>
+                </CardContent>
+              </Card>
+            ) : (
+              <div className="space-y-2.5">
+                {filteredClosings.map((closing) => {
+                  const isVoided = closing.status === "VOIDED";
+                  const shiftName =
+                    CLOSING_SHIFT_LABELS[closing.shift_label] ??
+                    closing.shift_label;
+                  const slotHasActiveReplacement = activeClosingSlots.has(
+                    `${closing.closing_date}:${closing.shift_label}`
+                  );
+                  const closingHref = `/dashboard/closing?date=${encodeURIComponent(
+                    closing.closing_date
+                  )}&shift=${encodeURIComponent(closing.shift_label)}`;
+
+                  return (
+                    <Card
+                      key={closing.id}
+                      className={
+                        isVoided
+                          ? "border-2 border-danger/50 bg-danger-soft/30"
+                          : "border-2 border-indigo-500/35 bg-indigo-500/5"
+                      }
+                    >
+                      <CardContent className="p-4 space-y-3">
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div className="space-y-1">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span
+                                className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 font-mono text-[11px] font-extrabold uppercase ${
+                                  isVoided
+                                    ? "bg-danger text-white"
+                                    : "bg-indigo-600 text-white"
+                                }`}
+                              >
+                                <ClipboardCheck className="h-3 w-3" />
+                                DAILY CLOSING
+                              </span>
+                              <span
+                                className={`font-mono text-sm font-extrabold ${
+                                  isVoided
+                                    ? "line-through text-danger"
+                                    : "text-ink"
+                                }`}
+                              >
+                                {closing.closing_date}
+                              </span>
+                              <Badge variant="neutral" className="text-[11px]">
+                                {shiftName}
+                              </Badge>
+                              {isVoided ? (
+                                <Badge variant="danger">VOIDED</Badge>
+                              ) : (
+                                <Badge variant="success">SAVED</Badge>
+                              )}
+                              {closing.replaces_closing_id && (
+                                <Badge variant="warning">
+                                  REPLACEMENT CLOSING
+                                </Badge>
+                              )}
+                            </div>
+                            <p className="text-xs text-muted">
+                              {closing.prepared_by_name
+                                ? `Prepared by ${closing.prepared_by_name}`
+                                : "Saved closing report"}
+                              {closing.notes ? ` • ${closing.notes}` : ""}
+                            </p>
+                            {isVoided && (
+                              <p className="text-xs font-semibold text-danger">
+                                Void Reason:{" "}
+                                {closing.void_reason || "Voided for correction"}
+                                {closing.voided_by_name
+                                  ? ` • Voided by ${closing.voided_by_name}`
+                                  : ""}
+                              </p>
+                            )}
+                          </div>
+
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="secondary"
+                              onClick={() => setViewingClosing(closing)}
+                            >
+                              <FileText className="h-3.5 w-3.5" /> View Report
+                            </Button>
+
+                            {canVoidClosing &&
+                              !isVoided &&
+                              onVoidClosing && (
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="danger"
+                                  onClick={() => {
+                                    setVoidClosingTarget(closing);
+                                    setVoidClosingReason("");
+                                    setVoidClosingError(null);
+                                  }}
+                                >
+                                  <Ban className="h-3.5 w-3.5" /> Void Closing
+                                </Button>
+                              )}
+
+                            {isVoided && !slotHasActiveReplacement && (
+                              <Link
+                                href={closingHref}
+                                className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-brand px-3 text-xs font-bold text-white shadow-xs transition hover:opacity-95"
+                              >
+                                <RotateCcw className="h-3.5 w-3.5" />
+                                Create Replacement Closing
+                              </Link>
+                            )}
+
+                            {isVoided && slotHasActiveReplacement && (
+                              <Link
+                                href={closingHref}
+                                className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border bg-warm px-3 text-xs font-bold text-ink transition hover:border-brand/50"
+                              >
+                                Open Replacement
+                              </Link>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 pt-2 border-t border-border/70 text-xs">
+                          <div className="rounded-lg bg-surface/60 px-3 py-2">
+                            <p className="text-[10px] font-bold uppercase text-muted">
+                              Total Sales (Net)
+                            </p>
+                            <p
+                              className={`font-mono text-sm font-extrabold ${
+                                isVoided
+                                  ? "line-through text-muted"
+                                  : "text-ink"
+                              }`}
+                            >
+                              {formatPkr(closing.net_sales_paisa)}
+                            </p>
+                          </div>
+                          <div className="rounded-lg bg-surface/60 px-3 py-2">
+                            <p className="text-[10px] font-bold uppercase text-muted">
+                              Cash Collected
+                            </p>
+                            <p
+                              className={`font-mono text-sm font-extrabold ${
+                                isVoided
+                                  ? "line-through text-muted"
+                                  : "text-brand-dark"
+                              }`}
+                            >
+                              {formatPkr(closing.cash_collected_paisa)}
+                            </p>
+                          </div>
+                          <div className="rounded-lg bg-surface/60 px-3 py-2">
+                            <p className="text-[10px] font-bold uppercase text-muted">
+                              Other Payments
+                            </p>
+                            <p
+                              className={`font-mono text-sm font-extrabold ${
+                                isVoided
+                                  ? "line-through text-muted"
+                                  : "text-ink"
+                              }`}
+                            >
+                              {formatPkr(closing.digital_sales_paisa)}
+                            </p>
+                          </div>
+                          <div className="rounded-lg bg-surface/60 px-3 py-2">
+                            <p className="text-[10px] font-bold uppercase text-muted">
+                              Actual Cash / Var
+                            </p>
+                            <p
+                              className={`font-mono text-sm font-extrabold ${
+                                isVoided
+                                  ? "line-through text-muted"
+                                  : "text-ink"
+                              }`}
+                            >
+                              {formatPkr(closing.actual_closing_paisa)}{" "}
+                              <span className="text-[11px] font-semibold text-muted">
+                                ({closing.cash_variance_paisa >= 0 ? "+" : ""}
+                                {formatPkr(closing.cash_variance_paisa)})
+                              </span>
+                            </p>
+                          </div>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
       {/* 3. Past Bills List with Semi-Highlighted Voided/Edited Alerts & Inline Order Editor */}
-      {filteredSales.length === 0 ? (
+      {recordTypeFilter === "CLOSINGS" ? null : filteredSales.length === 0 ? (
         <Card>
           <CardContent className="p-10 text-center space-y-2">
             <Receipt className="mx-auto h-8 w-8 text-muted" />
@@ -1085,6 +1485,348 @@ export function SalesHistoryManager({
               </Card>
             );
           })}
+        </div>
+      )}
+
+      {/* Complete Daily Closing Report Modal */}
+      {viewingClosing && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <div className="glass-modal w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl p-5 sm:p-6 space-y-4">
+            <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border pb-3">
+              <div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="rounded-md bg-indigo-600 px-2 py-0.5 font-mono text-[11px] font-extrabold text-white">
+                    DAILY CLOSING REPORT
+                  </span>
+                  <Badge
+                    variant={
+                      viewingClosing.status === "VOIDED" ? "danger" : "success"
+                    }
+                  >
+                    {viewingClosing.status}
+                  </Badge>
+                  {viewingClosing.replaces_closing_id && (
+                    <Badge variant="warning">REPLACEMENT</Badge>
+                  )}
+                </div>
+                <h3 className="mt-1.5 font-display text-lg font-extrabold text-ink">
+                  {viewingClosing.closing_date} •{" "}
+                  {CLOSING_SHIFT_LABELS[viewingClosing.shift_label] ??
+                    viewingClosing.shift_label}
+                </h3>
+                <p className="text-xs text-muted">
+                  {viewingClosing.prepared_by_name
+                    ? `Prepared by ${viewingClosing.prepared_by_name}`
+                    : "Daily reconciliation record"}
+                </p>
+              </div>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => setViewingClosing(null)}
+              >
+                <X className="h-4 w-4" /> Close
+              </Button>
+            </div>
+
+            {viewingClosing.status === "VOIDED" && (
+              <div className="rounded-xl border border-danger/40 bg-danger-soft/40 p-3 text-xs text-danger space-y-1">
+                <p className="font-extrabold">
+                  VOIDED ENTRY — Excluded from Totals &amp; Reports (Audit Preserved)
+                </p>
+                <p>
+                  Reason:{" "}
+                  {viewingClosing.void_reason || "Voided for correction"}
+                  {viewingClosing.voided_by_name
+                    ? ` • Voided by ${viewingClosing.voided_by_name}`
+                    : ""}
+                </p>
+              </div>
+            )}
+
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-xs">
+              <div className="rounded-xl border border-border bg-warm/50 p-3">
+                <p className="text-[10px] font-bold uppercase text-muted">
+                  Gross Sales
+                </p>
+                <p className="mt-0.5 font-mono text-sm font-extrabold text-ink">
+                  {formatPkr(viewingClosing.gross_sales_paisa)}
+                </p>
+              </div>
+              <div className="rounded-xl border border-border bg-warm/50 p-3">
+                <p className="text-[10px] font-bold uppercase text-muted">
+                  Refunds
+                </p>
+                <p className="mt-0.5 font-mono text-sm font-extrabold text-danger">
+                  {formatPkr(viewingClosing.refunds_paisa)}
+                </p>
+              </div>
+              <div className="rounded-xl border border-border bg-warm/50 p-3">
+                <p className="text-[10px] font-bold uppercase text-muted">
+                  Net Sales
+                </p>
+                <p className="mt-0.5 font-mono text-sm font-extrabold text-brand-dark">
+                  {formatPkr(viewingClosing.net_sales_paisa)}
+                </p>
+              </div>
+              <div className="rounded-xl border border-border bg-warm/50 p-3">
+                <p className="text-[10px] font-bold uppercase text-muted">
+                  Other Payments
+                </p>
+                <p className="mt-0.5 font-mono text-sm font-extrabold text-ink">
+                  {formatPkr(viewingClosing.digital_sales_paisa)}
+                </p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+              <div className="rounded-xl border border-border p-3 space-y-1.5">
+                <p className="font-bold uppercase text-[11px] text-muted">
+                  Cash Counted by Shift
+                </p>
+                <div className="flex justify-between">
+                  <span>Morning Cash</span>
+                  <span className="font-mono font-bold">
+                    {formatPkr(viewingClosing.morning_cash_paisa)}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span>Evening Cash</span>
+                  <span className="font-mono font-bold">
+                    {formatPkr(viewingClosing.evening_cash_paisa)}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span>Night / Other Cash</span>
+                  <span className="font-mono font-bold">
+                    {formatPkr(viewingClosing.night_cash_paisa)}
+                  </span>
+                </div>
+                <div className="flex justify-between border-t border-border pt-1.5 font-extrabold">
+                  <span>Total Cash Collected</span>
+                  <span className="font-mono text-brand-dark">
+                    {formatPkr(viewingClosing.cash_collected_paisa)}
+                  </span>
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-border p-3 space-y-1.5">
+                <p className="font-bold uppercase text-[11px] text-muted">
+                  Drawer Reconciliation
+                </p>
+                <div className="flex justify-between">
+                  <span>Total Expenses</span>
+                  <span className="font-mono font-bold text-danger">
+                    {formatPkr(viewingClosing.total_expenses_paisa)}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span>Daily Staff Wages</span>
+                  <span className="font-mono font-bold text-amber-500">
+                    {formatPkr(viewingClosing.total_wages_paisa)}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span>Expected Closing Cash</span>
+                  <span className="font-mono font-bold">
+                    {formatPkr(viewingClosing.expected_closing_paisa)}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span>Actual Physical Cash</span>
+                  <span className="font-mono font-bold">
+                    {formatPkr(viewingClosing.actual_closing_paisa)}
+                  </span>
+                </div>
+                <div className="flex justify-between border-t border-border pt-1.5 font-extrabold">
+                  <span>Cash Variance</span>
+                  <span className="font-mono">
+                    {viewingClosing.cash_variance_paisa >= 0 ? "+" : ""}
+                    {formatPkr(viewingClosing.cash_variance_paisa)}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {viewingClosing.expenses_json.length > 0 && (
+              <div className="rounded-xl border border-border p-3 space-y-1.5 text-xs">
+                <p className="font-bold uppercase text-[11px] text-muted">
+                  Recorded Expenses ({viewingClosing.expenses_json.length})
+                </p>
+                {viewingClosing.expenses_json.map((exp, idx) => (
+                  <div
+                    key={String(exp.id ?? idx)}
+                    className="flex justify-between gap-2 py-0.5"
+                  >
+                    <span>
+                      {String(exp.description ?? "Expense")}{" "}
+                      <span className="text-muted">
+                        ({String(exp.category ?? "General")})
+                      </span>
+                    </span>
+                    <span className="font-mono font-bold">
+                      {formatPkr(Number(exp.amountPaisa ?? 0))}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {viewingClosing.wages_json.length > 0 && (
+              <div className="rounded-xl border border-border p-3 space-y-1.5 text-xs">
+                <p className="font-bold uppercase text-[11px] text-muted">
+                  Recorded Daily Wages ({viewingClosing.wages_json.length})
+                </p>
+                {viewingClosing.wages_json.map((w, idx) => (
+                  <div
+                    key={String(w.id ?? idx)}
+                    className="flex justify-between gap-2 py-0.5"
+                  >
+                    <span>
+                      {String(w.name ?? "Staff")}{" "}
+                      <span className="text-muted">
+                        ({String(w.role ?? "Staff")})
+                      </span>
+                    </span>
+                    <span className="font-mono font-bold">
+                      {formatPkr(Number(w.wagePaisa ?? 0))}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {viewingClosing.notes && (
+              <div className="rounded-xl border border-border bg-warm/40 p-3 text-xs">
+                <span className="font-bold text-muted">Notes: </span>
+                <span>{viewingClosing.notes}</span>
+              </div>
+            )}
+
+            <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-border">
+              <Link
+                href={`/dashboard/closing?date=${encodeURIComponent(
+                  viewingClosing.closing_date
+                )}&shift=${encodeURIComponent(viewingClosing.shift_label)}`}
+                className="text-xs font-bold text-brand hover:underline"
+              >
+                Open in Daily Closing Sheet →
+              </Link>
+              <div className="flex flex-wrap items-center gap-2">
+                {canVoidClosing &&
+                  viewingClosing.status !== "VOIDED" &&
+                  onVoidClosing && (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="danger"
+                      onClick={() => {
+                        setVoidClosingTarget(viewingClosing);
+                        setVoidClosingReason("");
+                        setVoidClosingError(null);
+                      }}
+                    >
+                      <Ban className="h-3.5 w-3.5" /> Void Closing
+                    </Button>
+                  )}
+                {viewingClosing.status === "VOIDED" &&
+                  !activeClosingSlots.has(
+                    `${viewingClosing.closing_date}:${viewingClosing.shift_label}`
+                  ) && (
+                    <Link
+                      href={`/dashboard/closing?date=${encodeURIComponent(
+                        viewingClosing.closing_date
+                      )}&shift=${encodeURIComponent(viewingClosing.shift_label)}`}
+                      className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-brand px-3 text-xs font-bold text-white"
+                    >
+                      <RotateCcw className="h-3.5 w-3.5" />
+                      Create Replacement Closing
+                    </Link>
+                  )}
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => setViewingClosing(null)}
+                >
+                  Done
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Confirmation Modal for Voiding a Saved Daily Closing */}
+      {voidClosingTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <div className="glass-modal w-full max-w-md rounded-2xl p-5 sm:p-6 space-y-4">
+            <div className="flex items-start gap-3">
+              <div className="h-10 w-10 rounded-xl bg-danger-soft border border-danger/30 text-danger flex items-center justify-center shrink-0">
+                <AlertTriangle className="h-5 w-5" />
+              </div>
+              <div>
+                <h3 className="font-display text-base font-extrabold text-ink">
+                  Void Daily Closing ({voidClosingTarget.closing_date} •{" "}
+                  {CLOSING_SHIFT_LABELS[voidClosingTarget.shift_label] ??
+                    voidClosingTarget.shift_label}
+                  )?
+                </h3>
+                <p className="text-xs text-muted mt-1">
+                  The original closing record will be preserved as{" "}
+                  <strong className="text-danger">VOIDED</strong> for audit
+                  purposes. POS sales bills, payments, inventory stock, and cash
+                  sessions will remain untouched, and you can immediately create
+                  a replacement closing.
+                </p>
+              </div>
+            </div>
+
+            <form onSubmit={handleConfirmVoidClosing} className="space-y-3">
+              <div>
+                <Label htmlFor="salesHistoryVoidClosingReason">
+                  Reason for Voiding
+                </Label>
+                <Input
+                  id="salesHistoryVoidClosingReason"
+                  value={voidClosingReason}
+                  onChange={(e) => setVoidClosingReason(e.target.value)}
+                  placeholder="e.g. Entered wrong drawer cash or wrong shift"
+                  className="mt-1 h-10 text-xs"
+                  required
+                />
+              </div>
+              {voidClosingError && (
+                <p className="text-xs font-semibold text-danger">
+                  {voidClosingError}
+                </p>
+              )}
+              <div className="flex flex-wrap justify-end gap-2 pt-2">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  disabled={isVoidingClosing}
+                  onClick={() => {
+                    setVoidClosingTarget(null);
+                    setVoidClosingReason("");
+                    setVoidClosingError(null);
+                  }}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="submit"
+                  variant="danger"
+                  size="sm"
+                  loading={isVoidingClosing}
+                >
+                  <Ban className="h-3.5 w-3.5" /> Confirm Void Closing
+                </Button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
     </div>

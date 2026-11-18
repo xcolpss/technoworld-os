@@ -3,6 +3,8 @@
 import * as React from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useQueryClient } from "@tanstack/react-query";
+import { prefetchWorkspaceRoute } from "@/lib/workspace/prefetch";
 import {
   LayoutDashboard,
   ShoppingCart,
@@ -126,6 +128,7 @@ export function Sidebar({
   onCloseMobile,
 }: SidebarProps = {}) {
   const pathname = usePathname();
+  const queryClient = useQueryClient();
   const [internalMobileOpen, setInternalMobileOpen] = React.useState(false);
   const [openedPathname, setOpenedPathname] = React.useState(pathname);
   const [signOutDialogOpen, setSignOutDialogOpen] = React.useState(false);
@@ -189,6 +192,9 @@ export function Sidebar({
       <Link
         key={item.href}
         href={item.href}
+        prefetch={true}
+        onMouseEnter={() => prefetchWorkspaceRoute(queryClient, item.href)}
+        onFocus={() => prefetchWorkspaceRoute(queryClient, item.href)}
         onClick={showCloseButton ? closeMobile : undefined}
         className={`group relative flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-semibold transition-all duration-200 ${
           isActive

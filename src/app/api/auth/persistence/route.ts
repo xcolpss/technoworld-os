@@ -1,9 +1,12 @@
 import { NextResponse, type NextRequest } from "next/server";
 import {
+  AUTH_COOKIE_NAME,
   PERSISTENCE_COOKIE_NAME,
-  normalizeAuthCookieOptions,
+  buildPersistenceFlagCookieOptions,
+  buildSessionCookieOptions,
   type PersistenceMode,
-} from "@/lib/supabase/cookie-persistence";
+} from "@/lib/auth/cookie-persistence";
+import { updateSessionPersistenceInDb } from "@/lib/auth/local-auth";
 
 export async function POST(request: NextRequest) {
   let body: { rememberDevice?: boolean } = {};
@@ -16,29 +19,24 @@ export async function POST(request: NextRequest) {
   const mode: PersistenceMode =
     body.rememberDevice === false ? "session" : "persistent";
 
+  const signedSession = request.cookies.get(AUTH_COOKIE_NAME)?.value;
+  await updateSessionPersistenceInDb(signedSession, mode);
+
   const response = NextResponse.json({ ok: true, mode });
   const isSecure = request.nextUrl.protocol === "https:";
 
-  response.cookies.set(PERSISTENCE_COOKIE_NAME, mode, {
-    path: "/",
-    sameSite: "lax",
-    secure: isSecure,
-    ...(mode === "persistent" ? { maxAge: 60 * 60 * 24 * 365 } : {}),
-  });
+  response.cookies.set(
+    PERSISTENCE_COOKIE_NAME,
+    mode,
+    buildPersistenceFlagCookieOptions(mode, isSecure)
+  );
 
-  // Also normalize any currently present Supabase auth cookies on this response
-  for (const cookie of request.cookies.getAll()) {
-    if (cookie.name.startsWith("sb-") && cookie.name.includes("-auth-token")) {
-      response.cookies.set(
-        cookie.name,
-        cookie.value,
-        normalizeAuthCookieOptions(
-          cookie.name,
-          { path: "/", sameSite: "lax", secure: isSecure },
-          mode
-        )
-      );
-    }
+  if (signedSession) {
+    response.cookies.set(
+      AUTH_COOKIE_NAME,
+      signedSession,
+      buildSessionCookieOptions(mode, isSecure)
+    );
   }
 
   return response;

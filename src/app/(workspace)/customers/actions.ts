@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { getAuthenticatedShopContext } from "@/lib/auth/session";
-import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import { dbQuery, withTransaction } from "@/lib/db/pool";
 
 export interface CreateCustomerPayload {
   name: string;
@@ -28,38 +28,34 @@ export async function createCustomerAction(payload: CreateCustomerPayload) {
   const cleanName = String(payload.name || "").trim() || "Walk-in Customer";
   const cleanPhone = String(payload.phone || "").trim();
 
-  const admin = createSupabaseAdminClient();
-
-  // Duplicate Prevention: Check if customer with same phone already exists
   if (cleanPhone) {
-    const { data: existing } = await admin
-      .from("customers")
-      .select("id, name, full_name")
-      .eq("business_id", ctx.businessId)
-      .eq("phone", cleanPhone)
-      .maybeSingle();
-
+    const existingRes = await dbQuery<{ id: string; name: string | null }>(
+      `SELECT id, name FROM customers WHERE business_id = $1 AND phone = $2 LIMIT 1`,
+      [ctx.businessId, cleanPhone]
+    );
+    const existing = existingRes.rows[0];
     if (existing) {
       throw new Error(
-        `A customer with phone number ${cleanPhone} already exists (${existing.name || existing.full_name}).`
+        `A customer with phone number ${cleanPhone} already exists (${existing.name || "Customer"}).`
       );
     }
   }
 
-  const { error } = await admin.from("customers").insert({
-    business_id: ctx.businessId,
-    name: cleanName,
-    full_name: cleanName,
-    phone: cleanPhone || null,
-    address: payload.address?.trim() || null,
-    customer_type: payload.customerType,
-    credit_limit_paisa: Math.max(0, Number(payload.creditLimitPaisa) || 5000000),
-    notes: payload.notes?.trim() || null,
-  });
-
-  if (error) {
-    throw new Error(`Failed to create customer: ${error.message}`);
-  }
+  await dbQuery(
+    `INSERT INTO customers (
+       business_id, name, phone, address, customer_type, credit_limit_paisa, notes
+     )
+     VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+    [
+      ctx.businessId,
+      cleanName,
+      cleanPhone || null,
+      payload.address?.trim() || null,
+      payload.customerType,
+      Math.max(0, Number(payload.creditLimitPaisa) || 5000000),
+      payload.notes?.trim() || null,
+    ]
+  );
 
   revalidatePath("/customers");
   revalidatePath("/pos");
@@ -77,53 +73,64 @@ export async function recordRepaymentAction(payload: RecordRepaymentPayload) {
     throw new Error("Customer ID is required.");
   }
 
-  const admin = createSupabaseAdminClient();
+  await withTransaction(async (client) => {
+    await client.query(
+      `INSERT INTO customer_ledger (
+         business_id, customer_id, entry_type, amount_paisa,
+         payment_method, notes, recorded_by
+       )
+       VALUES ($1, $2, 'REPAYMENT', $3, $4, $5, $6)`,
+      [
+        ctx.businessId,
+        payload.customerId,
+        amountPaisa,
+        payload.paymentMethod,
+        payload.notes?.trim() || "Customer Udhaar Repayment",
+        ctx.userId,
+      ]
+    );
 
-  const { error: ledgerErr } = await admin.from("customer_ledger").insert({
-    business_id: ctx.businessId,
-    customer_id: payload.customerId,
-    entry_type: "REPAYMENT",
-    amount_paisa: amountPaisa,
-    payment_method: payload.paymentMethod,
-    notes: payload.notes?.trim() || "Customer Udhaar Repayment",
-    recorded_by: ctx.userId,
-  });
-
-  if (ledgerErr) {
-    throw new Error(`Failed to record repayment: ${ledgerErr.message}`);
-  }
-
-  if (payload.paymentMethod === "CASH") {
-    const { data: session } = await admin
-      .from("cash_sessions")
-      .select("id, expected_closing_paisa")
-      .eq("business_id", ctx.businessId)
-      .eq("status", "OPEN")
-      .order("opened_at", { ascending: true })
-      .limit(1)
-      .maybeSingle();
-
-    if (session) {
-      await admin
-        .from("cash_sessions")
-        .update({
-          expected_closing_paisa:
-            Number(session.expected_closing_paisa ?? 0) + amountPaisa,
-        })
-        .eq("id", session.id);
+    if (payload.paymentMethod === "CASH") {
+      const sessRes = await client.query<{
+        id: string;
+        expected_closing_paisa: string | number;
+      }>(
+        `SELECT id, expected_closing_paisa
+         FROM cash_sessions
+         WHERE business_id = $1 AND status = 'OPEN'
+         ORDER BY opened_at ASC
+         LIMIT 1
+         FOR UPDATE`,
+        [ctx.businessId]
+      );
+      if (sessRes.rows[0]) {
+        await client.query(
+          `UPDATE cash_sessions SET expected_closing_paisa = $1 WHERE id = $2`,
+          [
+            Number(sessRes.rows[0].expected_closing_paisa ?? 0) + amountPaisa,
+            sessRes.rows[0].id,
+          ]
+        );
+      }
     }
-  }
 
-  await admin.from("audit_logs").insert({
-    business_id: ctx.businessId,
-    actor_profile_id: ctx.userId,
-    action: "CUSTOMER_REPAYMENT_RECORDED",
-    entity_type: "customers",
-    entity_id: payload.customerId,
-    after_state: {
-      amount_paisa: amountPaisa,
-      payment_method: payload.paymentMethod,
-    },
+    await client.query(
+      `INSERT INTO audit_logs (business_id, actor_name, action_type, description, metadata)
+       VALUES ($1, $2, 'CUSTOMER_REPAYMENT_RECORDED', $3, $4::jsonb)`,
+      [
+        ctx.businessId,
+        ctx.fullName,
+        `Recorded Udhaar repayment Rs. ${Math.round(amountPaisa / 100)}`,
+        JSON.stringify({
+          entity_type: "customers",
+          entity_id: payload.customerId,
+          after_state: {
+            amount_paisa: amountPaisa,
+            payment_method: payload.paymentMethod,
+          },
+        }),
+      ]
+    );
   });
 
   revalidatePath("/customers");

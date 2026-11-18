@@ -1,4 +1,4 @@
-import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import { dbQuery } from "@/lib/db/pool";
 
 export type BiPeriodKey =
   | "today"
@@ -237,9 +237,27 @@ export interface BiClosingMiniSummary {
   cashDifferencePaisa: number;
 }
 
+export interface BiAccessoriesPnl {
+  grossBilledPaisa: number;
+  discountsPaisa: number;
+  netRevenuePaisa: number;
+  cogsPaisa: number;
+  grossProfitPaisa: number;
+  grossMarginPct: number;
+  operatingExpensesPaisa: number;
+  dailyWagesPaisa: number;
+  netOperatingProfitPaisa: number;
+  netMarginPct: number;
+  unitsSold: number;
+  billCount: number;
+  excludedServiceRevenuePaisa: number;
+  excludedServiceLines: number;
+}
+
 export interface OwnerBiPayload {
   dateRange: BiDateRange;
   overview: BiOverviewMetrics;
+  accessoriesPnl: BiAccessoriesPnl;
   products: BiProductStat[];
   categories: BiCategoryStat[];
   categoryTrends: BiCategoryTrendPoint[];
@@ -427,95 +445,152 @@ export async function getOwnerBiDashboardData(
   rawEnd?: string
 ): Promise<OwnerBiPayload> {
   const range = resolveBiDateRange(rawPeriod, rawStart, rawEnd);
-  const admin = createSupabaseAdminClient();
-
   const [
-    { data: rawSales },
-    { data: rawSaleItems },
-    { data: rawPayments },
-    { data: rawRefunds },
-    { data: rawRefundItems },
-    { data: rawExpenses },
-    { data: rawInventoryItems },
-    { data: rawProducts },
-    { data: rawServices },
-    { data: rawEmployees },
-    { data: rawProfiles },
-    { data: rawCashSessions },
-    { data: rawCustomers },
-    { data: rawLedger },
-    { data: rawSavedClosings },
+    salesRes,
+    saleItemsRes,
+    paymentsRes,
+    refundsRes,
+    refundItemsRes,
+    expensesRes,
+    inventoryRes,
+    productsRes,
+    servicesRes,
+    employeesRes,
+    profilesRes,
+    cashSessionsRes,
+    customersRes,
+    ledgerRes,
+    savedClosingsRes,
   ] = await Promise.all([
-    admin
-      .from("sales")
-      .select("*")
-      .eq("business_id", businessId)
-      .order("created_at", { ascending: false })
-      .range(0, 9999),
-    admin
-      .from("sale_items")
-      .select("*")
-      .eq("business_id", businessId)
-      .range(0, 19999),
-    admin
-      .from("payments")
-      .select("*")
-      .eq("business_id", businessId)
-      .range(0, 9999),
-    admin
-      .from("refunds")
-      .select("id, sale_id, total_refund_paisa, posted_at, created_at, status")
-      .eq("business_id", businessId)
-      .range(0, 4999),
-    admin
-      .from("refund_items")
-      .select("refund_id, sale_item_id, quantity, refund_amount_paisa")
-      .eq("business_id", businessId)
-      .range(0, 9999),
-    admin
-      .from("expenses")
-      .select("*")
-      .eq("business_id", businessId)
-      .range(0, 9999),
-    admin
-      .from("inventory_items")
-      .select("*")
-      .eq("business_id", businessId)
-      .range(0, 4999),
-    admin
-      .from("products")
-      .select("*")
-      .eq("business_id", businessId)
-      .range(0, 4999),
-    admin
-      .from("services")
-      .select("*")
-      .eq("business_id", businessId)
-      .range(0, 4999),
-    admin
-      .from("employees")
-      .select("id, profile_id, full_name, designation, employment_status")
-      .eq("business_id", businessId),
-    admin.from("profiles").select("id, full_name, email"),
-    admin
-      .from("cash_sessions")
-      .select("*")
-      .eq("business_id", businessId)
-      .order("opened_at", { ascending: false })
-      .limit(120),
-    admin.from("customers").select("*").eq("business_id", businessId),
-    admin
-      .from("customer_ledger")
-      .select("customer_id, entry_type, amount_paisa")
-      .eq("business_id", businessId),
-    admin
-      .from("saved_reports")
-      .select("*")
-      .eq("business_id", businessId)
-      .eq("report_type", "DAILY_CLOSING")
-      .order("created_at", { ascending: false })
-      .limit(90),
+    dbQuery(
+      `SELECT id, receipt_number, customer_name, notes, sold_by, cash_session_id,
+              subtotal_paisa, discount_paisa, total_paisa, status, posted_at, created_at
+       FROM sales WHERE business_id = $1 ORDER BY created_at DESC LIMIT 10000`,
+      [businessId]
+    ),
+    dbQuery(
+      `SELECT id, sale_id, item_kind, product_id, service_id, description, item_name,
+              category_name, quantity, unit_price_paisa, line_total_paisa, total_paisa,
+              unit_cost_snapshot_paisa, cost_price_paisa
+       FROM sale_items WHERE business_id = $1 LIMIT 20000`,
+      [businessId]
+    ),
+    dbQuery(
+      `SELECT sale_id, method, amount_paisa, status
+       FROM payments WHERE business_id = $1 LIMIT 10000`,
+      [businessId]
+    ),
+    dbQuery(
+      `SELECT id, sale_id, total_refund_paisa, posted_at, created_at, status
+       FROM refunds WHERE business_id = $1 LIMIT 5000`,
+      [businessId]
+    ),
+    dbQuery(
+      `SELECT refund_id, sale_item_id, quantity, refund_amount_paisa
+       FROM refund_items WHERE business_id = $1 LIMIT 10000`,
+      [businessId]
+    ),
+    dbQuery(
+      `SELECT id, category, description, amount_paisa, payment_source,
+              expense_date, incurred_at, created_at
+       FROM expenses WHERE business_id = $1 LIMIT 10000`,
+      [businessId]
+    ),
+    dbQuery(
+      `SELECT id, name, sku, category, stock_quantity, min_stock_alert,
+              cost_price_paisa, retail_price_paisa
+       FROM inventory_items WHERE business_id = $1 LIMIT 5000`,
+      [businessId]
+    ),
+    dbQuery(
+      `SELECT id, sku, name, cost_price_paisa, sale_price_paisa
+       FROM products WHERE business_id = $1 LIMIT 5000`,
+      [businessId]
+    ),
+    dbQuery(
+      `SELECT id, service_code, name, default_price_paisa
+       FROM services WHERE business_id = $1 LIMIT 5000`,
+      [businessId]
+    ),
+    dbQuery(
+      `SELECT id, profile_id, full_name, designation, employment_status
+       FROM employees WHERE business_id = $1`,
+      [businessId]
+    ),
+    dbQuery(`SELECT id, full_name, email FROM profiles`),
+    dbQuery(
+      `SELECT id, expected_closing_paisa, variance_paisa, status, opened_at
+       FROM cash_sessions WHERE business_id = $1 ORDER BY opened_at DESC LIMIT 120`,
+      [businessId]
+    ),
+    dbQuery(
+      `SELECT id, name, full_name FROM customers WHERE business_id = $1`,
+      [businessId]
+    ),
+    dbQuery(
+      `SELECT customer_id, entry_type, amount_paisa FROM customer_ledger WHERE business_id = $1`,
+      [businessId]
+    ),
+    dbQuery(
+      `SELECT id, closing_date, COALESCE(shift_label, 'FULL_DAY') AS shift_label,
+              morning_cash_paisa, evening_cash_paisa, night_cash_paisa,
+              gross_sales_paisa, refunds_paisa, net_sales_paisa, digital_sales_paisa,
+              total_expenses_paisa, total_wages_paisa, expected_closing_paisa,
+              actual_closing_paisa, cash_variance_paisa, expenses_json, wages_json
+       FROM daily_closings
+       WHERE business_id = $1 AND UPPER(COALESCE(status, 'SUBMITTED')) <> 'VOIDED'
+       ORDER BY closing_date DESC, created_at DESC LIMIT 90`,
+      [businessId]
+    ),
   ]);
+
+  const rawSales = salesRes.rows;
+  const rawSaleItems = saleItemsRes.rows;
+  const rawPayments = paymentsRes.rows;
+  const rawRefunds = refundsRes.rows;
+  const rawRefundItems = refundItemsRes.rows;
+  const rawExpenses = expensesRes.rows;
+  const rawInventoryItems = inventoryRes.rows;
+  const rawProducts = productsRes.rows;
+  const rawServices = servicesRes.rows;
+  const rawEmployees = employeesRes.rows;
+  const rawProfiles = profilesRes.rows;
+  const rawCashSessions = cashSessionsRes.rows;
+  const rawCustomers = customersRes.rows;
+  const rawLedger = ledgerRes.rows;
+  const rawSavedClosings = savedClosingsRes.rows.map((dc) => {
+    const dKey =
+      dc.closing_date instanceof Date
+        ? new Intl.DateTimeFormat("en-CA", {
+            timeZone: "Asia/Karachi",
+            year: "numeric",
+            month: "2-digit",
+            day: "2-digit",
+          }).format(dc.closing_date)
+        : String(dc.closing_date).slice(0, 10);
+    const shiftKey = String(dc.shift_label ?? "FULL_DAY").toUpperCase();
+    return {
+      ...dc,
+      title: `DAILY_CLOSING_${dKey}_${shiftKey}`,
+      payload: {
+        closingDate: dKey,
+        shiftLabel: shiftKey,
+        morningCashPaisa: Number(dc.morning_cash_paisa ?? 0),
+        eveningCashPaisa: Number(dc.evening_cash_paisa ?? 0),
+        nightCashPaisa: Number(dc.night_cash_paisa ?? 0),
+        grossSalesPaisa: Number(dc.gross_sales_paisa ?? 0),
+        refundsPaisa: Number(dc.refunds_paisa ?? 0),
+        netSalesPaisa: Number(dc.net_sales_paisa ?? 0),
+        digitalSalesPaisa: Number(dc.digital_sales_paisa ?? 0),
+        liveExpensesPaisa: Number(dc.total_expenses_paisa ?? 0),
+        closingExpenses: Array.isArray(dc.expenses_json) ? dc.expenses_json : [],
+        wages: Array.isArray(dc.wages_json) ? dc.wages_json : [],
+        expectedClosingPaisa: Number(dc.expected_closing_paisa ?? 0),
+        actualClosingPaisa: Number(dc.actual_closing_paisa ?? 0),
+        cashDifferencePaisa: Number(dc.cash_variance_paisa ?? 0),
+      },
+    };
+  });
 
   // Staff / Profile lookup maps
   const profileNameMap = new Map<string, string>();
@@ -613,12 +688,14 @@ export async function getOwnerBiDashboardData(
   // Saved closings by date
   const closingHistory: BiClosingMiniSummary[] = [];
   const wagesByDate = new Map<string, number>();
-  const closingSeenDates = new Set<string>();
+  const closingSeenSlots = new Set<string>();
   for (const rep of (rawSavedClosings ?? []) as Array<Record<string, unknown>>) {
     const pl = (rep.payload ?? {}) as Record<string, unknown>;
     const dateStr = String(pl.closingDate ?? "").slice(0, 10);
-    if (!dateStr || closingSeenDates.has(dateStr)) continue;
-    closingSeenDates.add(dateStr);
+    const shiftKey = String(pl.shiftLabel ?? "FULL_DAY").toUpperCase();
+    const slotKey = `${dateStr}:${shiftKey}`;
+    if (!dateStr || closingSeenSlots.has(slotKey)) continue;
+    closingSeenSlots.add(slotKey);
 
     const wageList = Array.isArray(pl.wages)
       ? (pl.wages as Array<Record<string, unknown>>)
@@ -634,7 +711,7 @@ export async function getOwnerBiDashboardData(
       Number(pl.liveExpensesPaisa ?? 0) +
       expList.reduce((s, e) => s + Number(e.amountPaisa ?? 0), 0);
 
-    wagesByDate.set(dateStr, totalWagesPaisa);
+    wagesByDate.set(dateStr, (wagesByDate.get(dateStr) ?? 0) + totalWagesPaisa);
     closingHistory.push({
       closingDate: dateStr,
       netSalesPaisa: Number(pl.netSalesPaisa ?? 0),
@@ -788,9 +865,13 @@ export async function getOwnerBiDashboardData(
   const resolveLineProductIdentity = (line: Record<string, unknown>) => {
     const prodId = line.product_id ? String(line.product_id) : null;
     const srvId = line.service_id ? String(line.service_id) : null;
+    const itemKind = String(line.item_kind ?? "").trim().toUpperCase();
     const prodRow = prodId ? productById.get(prodId) : undefined;
     const srvRow = srvId ? serviceById.get(srvId) : undefined;
-    const linkedInvId = prodId ? productToInvId.get(prodId) : undefined;
+    const linkedInvId =
+      itemKind !== "SERVICE" && !srvId && prodId
+        ? productToInvId.get(prodId) ?? (inventoryById.has(prodId) ? prodId : undefined)
+        : undefined;
     const invRow = linkedInvId ? inventoryById.get(linkedInvId) : undefined;
 
     const displayName = String(
@@ -803,20 +884,21 @@ export async function getOwnerBiDashboardData(
     ).trim();
 
     const category = String(
-      line.category_name ??
-        invRow?.category ??
-        (line.item_kind === "SERVICE" || srvId ? "Services" : "Accessories")
+      invRow?.category ??
+        line.category_name ??
+        (itemKind === "SERVICE" || srvId ? "Services" : "Accessories")
     );
 
-    if (linkedInvId) {
+    if (linkedInvId && invRow) {
       return {
         key: `inv:${linkedInvId}`,
         productId: linkedInvId,
+        isInventoryProduct: true,
         name: displayName,
         category,
         kind: "PRODUCT" as const,
-        fallbackUnitCost: Number(invRow?.cost_price_paisa ?? prodRow?.cost_price_paisa ?? 0),
-        fallbackUnitPrice: Number(invRow?.retail_price_paisa ?? prodRow?.sale_price_paisa ?? 0),
+        fallbackUnitCost: Number(invRow.cost_price_paisa ?? prodRow?.cost_price_paisa ?? 0),
+        fallbackUnitPrice: Number(invRow.retail_price_paisa ?? prodRow?.sale_price_paisa ?? 0),
       };
     }
 
@@ -824,6 +906,7 @@ export async function getOwnerBiDashboardData(
       return {
         key: `prod:${prodId}`,
         productId: prodId,
+        isInventoryProduct: false,
         name: displayName,
         category,
         kind: "PRODUCT" as const,
@@ -836,6 +919,7 @@ export async function getOwnerBiDashboardData(
       return {
         key: `srv:${srvId}`,
         productId: srvId,
+        isInventoryProduct: false,
         name: displayName,
         category,
         kind: "SERVICE" as const,
@@ -847,6 +931,7 @@ export async function getOwnerBiDashboardData(
     return {
       key: `custom:${displayName.toLowerCase()}`,
       productId: null,
+      isInventoryProduct: false,
       name: displayName,
       category,
       kind: "SERVICE" as const,
@@ -859,6 +944,7 @@ export async function getOwnerBiDashboardData(
     string,
     {
       revenuePaisa: number;
+      invRevenuePaisa: number;
       unitsSold: number;
       txIds: Set<string>;
       cogsPaisa: number;
@@ -920,8 +1006,20 @@ export async function getOwnerBiDashboardData(
 
   let prevGrossSalesPaisa = 0;
   let prevRefundsPaisa = 0;
+  let prevInvRevenuePaisa = 0;
+  let prevInvRefundsPaisa = 0;
   let prevCogsPaisa = 0;
   let prevTransactionCount = 0;
+
+  // Inventory-Products-Only Profit & Loss accumulators (excludes Movies, Printing, Photocopying, Composing & Services)
+  let currentInvRevenuePaisa = 0;
+  let currentInvRefundsPaisa = 0;
+  let accGrossBilledPaisa = 0;
+  let accDiscountsPaisa = 0;
+  let accUnitsSold = 0;
+  const accBillIds = new Set<string>();
+  let excludedServiceRevenuePaisa = 0;
+  let excludedServiceLines = 0;
 
   const transactions: TxInspectItem[] = [];
 
@@ -946,11 +1044,13 @@ export async function getOwnerBiDashboardData(
     );
     const lines = itemsBySale.get(saleId) ?? [];
 
-    let saleCogsPaisa = 0;
+    let saleProductRevenuePaisa = 0;
+    let saleProductCogsPaisa = 0;
     let saleUnits = 0;
     const txLineItems: Array<{
       productKey: string;
       productId: string | null;
+      isInventoryProduct: boolean;
       kind: "PRODUCT" | "SERVICE";
       name: string;
       category: string;
@@ -987,16 +1087,20 @@ export async function getOwnerBiDashboardData(
       );
       const unitCost =
         rawUnitCost > 0 ? rawUnitCost : ident.fallbackUnitCost;
-      const lineCogs = unitCost * qty;
+      const lineCogs = ident.isInventoryProduct ? unitCost * qty : 0;
       const unitPrice = Number(
         line.unit_price_paisa ?? Math.round(rawLineTotal / qty)
       );
 
-      saleCogsPaisa += lineCogs;
+      if (ident.isInventoryProduct) {
+        saleProductRevenuePaisa += scaledLineTotal;
+        saleProductCogsPaisa += lineCogs;
+      }
       saleUnits += qty;
       txLineItems.push({
         productKey: ident.key,
         productId: ident.productId,
+        isInventoryProduct: ident.isInventoryProduct,
         kind: ident.kind,
         name: ident.name,
         category: ident.category,
@@ -1058,8 +1162,8 @@ export async function getOwnerBiDashboardData(
       ] as const) {
         const b = ensureBucket(m, k, l);
         b.revenuePaisa += totalPaisa;
-        b.cogsPaisa += saleCogsPaisa;
-        b.grossProfitPaisa += totalPaisa - saleCogsPaisa;
+        b.cogsPaisa += saleProductCogsPaisa;
+        b.grossProfitPaisa += saleProductRevenuePaisa - saleProductCogsPaisa;
         b.transactionCount += 1;
         b.unitsSold += saleUnits;
         if (primaryMethod === "CASH") b.cashPaisa += totalPaisa;
@@ -1074,26 +1178,13 @@ export async function getOwnerBiDashboardData(
         prevRefundsPaisa += totalPaisa;
       } else {
         prevGrossSalesPaisa += totalPaisa;
-        prevCogsPaisa += saleCogsPaisa;
+        prevInvRevenuePaisa += saleProductRevenuePaisa;
+        prevCogsPaisa += saleProductCogsPaisa;
         prevTransactionCount += 1;
 
         for (const li of txLineItems) {
-          const existing = productAgg.get(li.productKey) ?? {
-            key: li.productKey,
-            productId: li.productId,
-            name: li.name,
-            category: li.category,
-            kind: li.kind,
-            unitsSold: 0,
-            revenuePaisa: 0,
-            cogsPaisa: 0,
-            prevUnitsSold: 0,
-            prevRevenuePaisa: 0,
-            currentStock: null,
-            minStockAlert: null,
-            costPricePaisa: li.unitCostPaisa,
-            retailPricePaisa: li.unitPricePaisa,
-          };
+          if (!li.isInventoryProduct || !productAgg.has(li.productKey)) continue;
+          const existing = productAgg.get(li.productKey)!;
           existing.prevUnitsSold += li.quantity;
           existing.prevRevenuePaisa += li.revenuePaisa;
           productAgg.set(li.productKey, existing);
@@ -1142,7 +1233,7 @@ export async function getOwnerBiDashboardData(
         subtotalPaisa,
         discountPaisa,
         totalPaisa,
-        cogsPaisa: saleCogsPaisa,
+        cogsPaisa: saleProductCogsPaisa,
         profitPaisa: 0,
         units: saleUnits,
         status: String(sale.status ?? "VOIDED"),
@@ -1160,7 +1251,8 @@ export async function getOwnerBiDashboardData(
     grossBilledPaisa += subtotalPaisa;
     discountsPaisa += discountPaisa;
     grossSalesPaisa += totalPaisa;
-    cogsPaisa += saleCogsPaisa;
+    currentInvRevenuePaisa += saleProductRevenuePaisa;
+    cogsPaisa += saleProductCogsPaisa;
     transactionCount += 1;
     totalUnitsSold += saleUnits;
 
@@ -1204,8 +1296,8 @@ export async function getOwnerBiDashboardData(
       dailyMap.set(datePk, dPoint);
     }
     dPoint.revenuePaisa += totalPaisa;
-    dPoint.cogsPaisa += saleCogsPaisa;
-    dPoint.grossProfitPaisa += totalPaisa - saleCogsPaisa;
+    dPoint.cogsPaisa += saleProductCogsPaisa;
+    dPoint.grossProfitPaisa += saleProductRevenuePaisa - saleProductCogsPaisa;
     dPoint.transactionCount += 1;
     dPoint.unitsSold += saleUnits;
     if (primaryMethod === "CASH") dPoint.cashPaisa += totalPaisa;
@@ -1215,8 +1307,8 @@ export async function getOwnerBiDashboardData(
     const hPoint = hourlyMap.get(hourPk);
     if (hPoint) {
       hPoint.revenuePaisa += totalPaisa;
-      hPoint.cogsPaisa += saleCogsPaisa;
-      hPoint.grossProfitPaisa += totalPaisa - saleCogsPaisa;
+      hPoint.cogsPaisa += saleProductCogsPaisa;
+      hPoint.grossProfitPaisa += saleProductRevenuePaisa - saleProductCogsPaisa;
       hPoint.transactionCount += 1;
       hPoint.unitsSold += saleUnits;
       if (primaryMethod === "CASH") hPoint.cashPaisa += totalPaisa;
@@ -1249,31 +1341,20 @@ export async function getOwnerBiDashboardData(
     };
 
     for (const li of txLineItems) {
-      const existing = productAgg.get(li.productKey) ?? {
-        key: li.productKey,
-        productId: li.productId,
-        name: li.name,
-        category: li.category,
-        kind: li.kind,
-        unitsSold: 0,
-        revenuePaisa: 0,
-        cogsPaisa: 0,
-        prevUnitsSold: 0,
-        prevRevenuePaisa: 0,
-        currentStock: null,
-        minStockAlert: null,
-        costPricePaisa: li.unitCostPaisa,
-        retailPricePaisa: li.unitPricePaisa,
-      };
-      existing.unitsSold += li.quantity;
-      existing.revenuePaisa += li.revenuePaisa;
-      existing.cogsPaisa += li.cogsPaisa;
-      if (li.unitPricePaisa > 0) existing.retailPricePaisa = li.unitPricePaisa;
-      if (li.unitCostPaisa > 0) existing.costPricePaisa = li.unitCostPaisa;
-      productAgg.set(li.productKey, existing);
+      // Product Rankings strictly use physical inventory products only
+      if (li.isInventoryProduct && productAgg.has(li.productKey)) {
+        const existing = productAgg.get(li.productKey)!;
+        existing.unitsSold += li.quantity;
+        existing.revenuePaisa += li.revenuePaisa;
+        existing.cogsPaisa += li.cogsPaisa;
+        if (li.unitPricePaisa > 0) existing.retailPricePaisa = li.unitPricePaisa;
+        if (li.unitCostPaisa > 0) existing.costPricePaisa = li.unitCostPaisa;
+        productAgg.set(li.productKey, existing);
+      }
 
       const catEntry = categoryMap.get(li.category) ?? {
         revenuePaisa: 0,
+        invRevenuePaisa: 0,
         unitsSold: 0,
         txIds: new Set<string>(),
         cogsPaisa: 0,
@@ -1282,7 +1363,10 @@ export async function getOwnerBiDashboardData(
       catEntry.revenuePaisa += li.revenuePaisa;
       catEntry.unitsSold += li.quantity;
       catEntry.txIds.add(saleId);
-      catEntry.cogsPaisa += li.cogsPaisa;
+      if (li.isInventoryProduct) {
+        catEntry.invRevenuePaisa += li.revenuePaisa;
+        catEntry.cogsPaisa += li.cogsPaisa;
+      }
       catEntry.productRevenue.set(
         li.name,
         (catEntry.productRevenue.get(li.name) ?? 0) + li.revenuePaisa
@@ -1297,6 +1381,17 @@ export async function getOwnerBiDashboardData(
         li.category,
         (empEntry.categoryRevenue.get(li.category) ?? 0) + li.revenuePaisa
       );
+
+      if (li.isInventoryProduct) {
+        const grossLine = Math.max(li.unitPricePaisa * li.quantity, li.revenuePaisa);
+        accGrossBilledPaisa += grossLine;
+        accDiscountsPaisa += Math.max(0, grossLine - li.revenuePaisa);
+        accUnitsSold += li.quantity;
+        accBillIds.add(saleId);
+      } else {
+        excludedServiceRevenuePaisa += li.revenuePaisa;
+        excludedServiceLines += 1;
+      }
     }
 
     categoryTrendMap.set(trendBucketKey, trendPoint);
@@ -1319,8 +1414,8 @@ export async function getOwnerBiDashboardData(
       subtotalPaisa,
       discountPaisa,
       totalPaisa,
-      cogsPaisa: saleCogsPaisa,
-      profitPaisa: totalPaisa - saleCogsPaisa,
+      cogsPaisa: saleProductCogsPaisa,
+      profitPaisa: saleProductRevenuePaisa - saleProductCogsPaisa,
       units: saleUnits,
       status: String(sale.status ?? "POSTED"),
       items: txLineItems.map((i) => ({
@@ -1364,10 +1459,10 @@ export async function getOwnerBiDashboardData(
             sItem.cost_price_paisa ??
             ident.fallbackUnitCost
         );
-        const rCogs = rQty * unitCost;
+        const rCogs = ident.isInventoryProduct ? rQty * unitCost : 0;
 
-        const pAgg = productAgg.get(ident.key);
-        if (pAgg) {
+        if (ident.isInventoryProduct && productAgg.has(ident.key)) {
+          const pAgg = productAgg.get(ident.key)!;
           pAgg.unitsSold = Math.max(0, pAgg.unitsSold - rQty);
           pAgg.revenuePaisa = Math.max(0, pAgg.revenuePaisa - rAmt);
           pAgg.cogsPaisa = Math.max(0, pAgg.cogsPaisa - rCogs);
@@ -1377,16 +1472,37 @@ export async function getOwnerBiDashboardData(
         if (cAgg) {
           cAgg.unitsSold = Math.max(0, cAgg.unitsSold - rQty);
           cAgg.revenuePaisa = Math.max(0, cAgg.revenuePaisa - rAmt);
-          cAgg.cogsPaisa = Math.max(0, cAgg.cogsPaisa - rCogs);
+          if (ident.isInventoryProduct) {
+            cAgg.invRevenuePaisa = Math.max(0, cAgg.invRevenuePaisa - rAmt);
+            cAgg.cogsPaisa = Math.max(0, cAgg.cogsPaisa - rCogs);
+          }
           const curPr = cAgg.productRevenue.get(ident.name) ?? 0;
           cAgg.productRevenue.set(ident.name, Math.max(0, curPr - rAmt));
         }
 
-        cogsPaisa = Math.max(0, cogsPaisa - rCogs);
+        if (ident.isInventoryProduct) {
+          currentInvRefundsPaisa += rAmt;
+          cogsPaisa = Math.max(0, cogsPaisa - rCogs);
+        }
         totalUnitsSold = Math.max(0, totalUnitsSold - rQty);
       }
     } else if (rDate >= range.prevStartDate && rDate <= range.prevEndDate) {
       prevRefundsPaisa += amt;
+      for (const ri of rfItems) {
+        const sItem = saleItemById.get(String(ri.sale_item_id));
+        if (!sItem) continue;
+        const ident = resolveLineProductIdentity(sItem);
+        if (!ident.isInventoryProduct) continue;
+        const rQty = Math.max(0, Number(ri.quantity ?? 0));
+        const rAmt = Math.max(0, Number(ri.refund_amount_paisa ?? 0));
+        const unitCost = Number(
+          sItem.unit_cost_snapshot_paisa ??
+            sItem.cost_price_paisa ??
+            ident.fallbackUnitCost
+        );
+        prevInvRefundsPaisa += rAmt;
+        prevCogsPaisa = Math.max(0, prevCogsPaisa - rQty * unitCost);
+      }
     }
   }
 
@@ -1537,16 +1653,17 @@ export async function getOwnerBiDashboardData(
   }
 
   const netRevenuePaisa = Math.max(0, grossSalesPaisa - refundsPaisa);
-  const grossProfitPaisa = netRevenuePaisa - cogsPaisa;
+  const invNetRevenueCurrent = Math.max(0, currentInvRevenuePaisa - currentInvRefundsPaisa);
+  const grossProfitPaisa = invNetRevenueCurrent - cogsPaisa;
   const grossMarginPct =
-    netRevenuePaisa > 0
-      ? Number(((grossProfitPaisa / netRevenuePaisa) * 100).toFixed(1))
+    invNetRevenueCurrent > 0
+      ? Number(((grossProfitPaisa / invNetRevenueCurrent) * 100).toFixed(1))
       : 0;
   const totalExpensesAndWagesPaisa = operatingExpensesPaisa + dailyWagesPaisa;
   const netOperatingProfitPaisa = grossProfitPaisa - totalExpensesAndWagesPaisa;
   const netMarginPct =
-    netRevenuePaisa > 0
-      ? Number(((netOperatingProfitPaisa / netRevenuePaisa) * 100).toFixed(1))
+    invNetRevenueCurrent > 0
+      ? Number(((netOperatingProfitPaisa / invNetRevenueCurrent) * 100).toFixed(1))
       : 0;
   const aovPaisa =
     transactionCount > 0 ? Math.round(netRevenuePaisa / transactionCount) : 0;
@@ -1555,8 +1672,12 @@ export async function getOwnerBiDashboardData(
     range.period === "lifetime"
       ? 0
       : Math.max(0, prevGrossSalesPaisa - prevRefundsPaisa);
+  const prevInvNetRevenue =
+    range.period === "lifetime"
+      ? 0
+      : Math.max(0, prevInvRevenuePaisa - prevInvRefundsPaisa);
   const prevGrossProfitPaisa =
-    range.period === "lifetime" ? 0 : prevNetRevenuePaisa - prevCogsPaisa;
+    range.period === "lifetime" ? 0 : prevInvNetRevenue - prevCogsPaisa;
   const prevTotalExpenses =
     range.period === "lifetime" ? 0 : prevExpensesPaisa + prevWagesPaisa;
 
@@ -1616,7 +1737,7 @@ export async function getOwnerBiDashboardData(
 
   const categories: BiCategoryStat[] = Array.from(categoryMap.entries())
     .map(([category, c]) => {
-      const gp = c.revenuePaisa - c.cogsPaisa;
+      const gp = c.invRevenuePaisa - c.cogsPaisa;
       const sortedProds = Array.from(c.productRevenue.entries()).sort(
         (a, b) => b[1] - a[1]
       );
@@ -1628,8 +1749,8 @@ export async function getOwnerBiDashboardData(
         cogsPaisa: c.cogsPaisa,
         grossProfitPaisa: gp,
         marginPct:
-          c.revenuePaisa > 0
-            ? Number(((gp / c.revenuePaisa) * 100).toFixed(1))
+          c.invRevenuePaisa > 0
+            ? Number(((gp / c.invRevenuePaisa) * 100).toFixed(1))
             : 0,
         revenueSharePct:
           totalCatRev > 0
@@ -1647,8 +1768,10 @@ export async function getOwnerBiDashboardData(
 
   const highestRevenueCategory = categories[0]?.category ?? null;
   const highestProfitCategory =
-    [...categories].sort((a, b) => b.grossProfitPaisa - a.grossProfitPaisa)[0]
-      ?.category ?? null;
+    categories
+      .filter((c) => c.grossProfitPaisa > 0)
+      .sort((a, b) => b.grossProfitPaisa - a.grossProfitPaisa)[0]?.category ??
+    null;
   const lowestPerformingCategory =
     categories.length > 0
       ? [...categories].sort((a, b) => a.revenuePaisa - b.revenuePaisa)[0]
@@ -1827,8 +1950,38 @@ export async function getOwnerBiDashboardData(
     });
   }
 
+  const effectiveAccNetRevenuePaisa = invNetRevenueCurrent;
+  const effectiveAccCogsPaisa = cogsPaisa;
+  const accGrossProfitPaisa = effectiveAccNetRevenuePaisa - effectiveAccCogsPaisa;
+  const accGrossMarginPct =
+    effectiveAccNetRevenuePaisa > 0
+      ? Math.round((accGrossProfitPaisa / effectiveAccNetRevenuePaisa) * 1000) / 10
+      : 0;
+  const accNetOperatingProfitPaisa =
+    accGrossProfitPaisa - operatingExpensesPaisa - dailyWagesPaisa;
+  const accNetMarginPct =
+    effectiveAccNetRevenuePaisa > 0
+      ? Math.round((accNetOperatingProfitPaisa / effectiveAccNetRevenuePaisa) * 1000) / 10
+      : 0;
+
   return {
     dateRange: range,
+    accessoriesPnl: {
+      grossBilledPaisa: accGrossBilledPaisa,
+      discountsPaisa: accDiscountsPaisa,
+      netRevenuePaisa: effectiveAccNetRevenuePaisa,
+      cogsPaisa: effectiveAccCogsPaisa,
+      grossProfitPaisa: accGrossProfitPaisa,
+      grossMarginPct: accGrossMarginPct,
+      operatingExpensesPaisa,
+      dailyWagesPaisa,
+      netOperatingProfitPaisa: accNetOperatingProfitPaisa,
+      netMarginPct: accNetMarginPct,
+      unitsSold: accUnitsSold,
+      billCount: accBillIds.size,
+      excludedServiceRevenuePaisa,
+      excludedServiceLines,
+    },
     overview: {
       grossBilledPaisa,
       discountsPaisa,

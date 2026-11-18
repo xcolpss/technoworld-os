@@ -3,8 +3,15 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { getAuthenticatedShopContext } from "@/lib/auth/session";
-import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import { dbQuery, withTransaction } from "@/lib/db/pool";
+import { hasRequiredRole } from "@/lib/auth/permissions";
 import { writeAuditLog } from "@/lib/audit/log";
+import {
+  normalizeClosingShiftLabel,
+  type ClosingShiftLabel,
+} from "@/lib/closing/shift";
+
+export type { ClosingShiftLabel };
 
 export interface ClosingExpenseEntry {
   id: string;
@@ -24,8 +31,19 @@ export interface ClosingWageEntry {
   notes: string;
 }
 
+export interface VoidedClosingContext {
+  id: string;
+  voidReason: string | null;
+  voidedAtIso: string | null;
+  voidedByName: string | null;
+}
+
 export interface DailyClosingRecord {
+  id: string | null;
   closingDate: string;
+  shiftLabel: ClosingShiftLabel;
+  replacesClosingId?: string | null;
+  replacedVoided?: VoidedClosingContext | null;
   morningCashPaisa: number;
   eveningCashPaisa: number;
   nightCashPaisa: number;
@@ -42,13 +60,19 @@ export interface DailyClosingRecord {
   cashDifferencePaisa: number;
   transactionCount: number;
   notes: string;
-  status: "DRAFT" | "SAVED";
+  status: "DRAFT" | "SAVED" | "VOIDED";
   savedAtIso: string | null;
   preparedByName: string | null;
+  voidReason?: string | null;
+  voidedAtIso?: string | null;
+  voidedByName?: string | null;
 }
 
 export interface ClosingHistorySummary {
+  id: string;
   closingDate: string;
+  shiftLabel: ClosingShiftLabel;
+  replacesClosingId?: string | null;
   grossSalesPaisa: number;
   netSalesPaisa: number;
   cashCollectedPaisa: number;
@@ -58,12 +82,18 @@ export interface ClosingHistorySummary {
   expectedClosingPaisa: number;
   actualClosingPaisa: number;
   cashDifferencePaisa: number;
-  status: "DRAFT" | "SAVED";
+  status: "DRAFT" | "SAVED" | "VOIDED";
+  preparedByName?: string | null;
+  voidReason?: string | null;
+  voidedAtIso?: string | null;
+  voidedByName?: string | null;
   updatedAtIso: string;
 }
 
 export interface SaveDailyClosingPayload {
   closingDate: string;
+  shiftLabel?: ClosingShiftLabel;
+  replacesClosingId?: string | null;
   morningCashPaisa: number;
   eveningCashPaisa: number;
   nightCashPaisa: number;
@@ -107,7 +137,8 @@ function isVoidedStatus(status: unknown): boolean {
 }
 
 export async function loadClosingDataForDate(
-  closingDate: string
+  closingDate: string,
+  rawShiftLabel?: string
 ): Promise<{
   record: DailyClosingRecord;
   history: ClosingHistorySummary[];
@@ -115,60 +146,113 @@ export async function loadClosingDataForDate(
   const ctx = await getAuthenticatedShopContext();
   if (!ctx || !ctx.businessId) redirect("/login");
 
-  const admin = createSupabaseAdminClient();
   const targetDate = /^\d{4}-\d{2}-\d{2}$/.test(closingDate)
     ? closingDate
     : formatPkDate();
+  const targetShift = normalizeClosingShiftLabel(rawShiftLabel);
 
   const [
-    { data: rawSales },
-    { data: rawPayments },
-    { data: rawRefunds },
-    { data: rawExpenses },
-    { data: rawEmployees },
-    { data: rawSnapshots },
-    { data: rawSavedReports },
+    salesRes,
+    paymentsRes,
+    refundsRes,
+    expensesRes,
+    employeesRes,
+    snapshotsRes,
+    closingsRes,
   ] = await Promise.all([
-    admin
-      .from("sales")
-      .select("id, total_paisa, discount_paisa, status, created_at, completed_at")
-      .eq("business_id", ctx.businessId)
-      .order("created_at", { ascending: false })
-      .range(0, 4999),
-    admin
-      .from("payments")
-      .select("sale_id, method, amount_paisa, status, received_at")
-      .eq("business_id", ctx.businessId)
-      .range(0, 4999),
-    admin
-      .from("refunds")
-      .select("sale_id, total_refund_paisa, posted_at, created_at, status")
-      .eq("business_id", ctx.businessId)
-      .range(0, 4999),
-    admin
-      .from("expenses")
-      .select("id, description, category, amount_paisa, payment_source, expense_date, incurred_at, created_at")
-      .eq("business_id", ctx.businessId)
-      .range(0, 4999),
-    admin
-      .from("employees")
-      .select("id, full_name, designation, salary_amount_paisa, salary_type, employment_status")
-      .eq("business_id", ctx.businessId)
-      .eq("employment_status", "ACTIVE"),
-    admin
-      .from("daily_report_snapshots")
-      .select("*")
-      .eq("business_id", ctx.businessId)
-      .order("snapshot_date", { ascending: false })
-      .limit(90),
-    admin
-      .from("saved_reports")
-      .select("*")
-      .eq("business_id", ctx.businessId)
-      .eq("report_type", "DAILY_CLOSING")
-      .order("created_at", { ascending: false })
-      .limit(90),
+    dbQuery(
+      `SELECT id, total_paisa, discount_paisa, status, created_at, posted_at
+       FROM sales WHERE business_id = $1 ORDER BY created_at DESC LIMIT 5000`,
+      [ctx.businessId]
+    ),
+    dbQuery(
+      `SELECT sale_id, method, amount_paisa, status, received_at
+       FROM payments WHERE business_id = $1 LIMIT 5000`,
+      [ctx.businessId]
+    ),
+    dbQuery(
+      `SELECT sale_id, total_refund_paisa, posted_at, created_at, status
+       FROM refunds WHERE business_id = $1 LIMIT 5000`,
+      [ctx.businessId]
+    ),
+    dbQuery(
+      `SELECT id, description, category, amount_paisa, payment_source, expense_date, incurred_at, created_at
+       FROM expenses WHERE business_id = $1 LIMIT 5000`,
+      [ctx.businessId]
+    ),
+    dbQuery(
+      `SELECT id, full_name, designation, salary_amount_paisa, salary_type, employment_status
+       FROM employees WHERE business_id = $1 AND employment_status = 'ACTIVE'`,
+      [ctx.businessId]
+    ),
+    dbQuery(
+      `SELECT * FROM daily_report_snapshots
+       WHERE business_id = $1 ORDER BY snapshot_date DESC LIMIT 90`,
+      [ctx.businessId]
+    ),
+    dbQuery(
+      `SELECT dc.*, COALESCE(NULLIF(dc.prepared_by_name, ''), u.full_name, p.full_name) AS prepared_by_resolved
+       FROM daily_closings dc
+       LEFT JOIN auth_users u ON u.id = dc.prepared_by
+       LEFT JOIN profiles p ON p.id = dc.prepared_by
+       WHERE dc.business_id = $1
+       ORDER BY dc.closing_date DESC, dc.created_at DESC
+       LIMIT 150`,
+      [ctx.businessId]
+    ),
   ]);
+
+  const rawSales = salesRes.rows;
+  const rawPayments = paymentsRes.rows;
+  const rawRefunds = refundsRes.rows;
+  const rawExpenses = expensesRes.rows;
+  const rawEmployees = employeesRes.rows;
+  const rawSnapshots = snapshotsRes.rows;
+  const rawSavedReports = closingsRes.rows.map((dc) => {
+    const dKey =
+      dc.closing_date instanceof Date
+        ? formatPkDate(dc.closing_date)
+        : String(dc.closing_date).slice(0, 10);
+    const dcShift = normalizeClosingShiftLabel(dc.shift_label);
+    const dcStatus = String(dc.status ?? "SUBMITTED").toUpperCase();
+    return {
+      id: String(dc.id),
+      title: `DAILY_CLOSING_${dKey}_${dcShift}`,
+      updated_at: dc.updated_at,
+      created_at: dc.created_at,
+      payload: {
+        id: String(dc.id),
+        closingDate: dKey,
+        shiftLabel: dcShift,
+        replacesClosingId: dc.replaces_closing_id ? String(dc.replaces_closing_id) : null,
+        status: dcStatus === "VOIDED" ? ("VOIDED" as const) : ("SAVED" as const),
+        voidReason: dc.void_reason ? String(dc.void_reason) : null,
+        voidedAtIso: dc.voided_at ? new Date(String(dc.voided_at)).toISOString() : null,
+        voidedByName: dc.voided_by_name ? String(dc.voided_by_name) : null,
+        morningCashPaisa: Number(dc.morning_cash_paisa ?? 0),
+        eveningCashPaisa: Number(dc.evening_cash_paisa ?? 0),
+        nightCashPaisa: Number(dc.night_cash_paisa ?? 0),
+        grossSalesPaisa: Number(dc.gross_sales_paisa ?? 0),
+        refundsPaisa: Number(dc.refunds_paisa ?? 0),
+        netSalesPaisa: Number(dc.net_sales_paisa ?? 0),
+        cashCollectedPaisa:
+          Number(dc.morning_cash_paisa ?? 0) +
+          Number(dc.evening_cash_paisa ?? 0) +
+          Number(dc.night_cash_paisa ?? 0),
+        digitalSalesPaisa: Number(dc.digital_sales_paisa ?? 0),
+        liveExpensesPaisa: Number(dc.total_expenses_paisa ?? 0),
+        closingExpenses: Array.isArray(dc.expenses_json) ? dc.expenses_json : [],
+        wages: Array.isArray(dc.wages_json) ? dc.wages_json : [],
+        expectedClosingPaisa: Number(dc.expected_closing_paisa ?? 0),
+        actualClosingPaisa: Number(dc.actual_closing_paisa ?? 0),
+        cashDifferencePaisa: Number(dc.cash_variance_paisa ?? 0),
+        notes: dc.notes ? String(dc.notes) : "",
+        preparedByName: dc.prepared_by_resolved
+          ? String(dc.prepared_by_resolved)
+          : ctx.fullName,
+      },
+    };
+  });
 
   const paymentBySale = new Map<string, { method: string; amountPaisa: number }>();
   for (const p of (rawPayments ?? []) as Array<Record<string, unknown>>) {
@@ -188,7 +272,7 @@ export async function loadClosingDataForDate(
   let transactionCount = 0;
 
   for (const sale of (rawSales ?? []) as Array<Record<string, unknown>>) {
-    const iso = String(sale.completed_at ?? sale.created_at ?? "");
+    const iso = String(sale.posted_at ?? sale.created_at ?? "");
     if (!iso) continue;
     const salePkDate = formatPkDate(new Date(iso));
     if (salePkDate !== targetDate) continue;
@@ -262,20 +346,38 @@ export async function loadClosingDataForDate(
     0
   );
 
-  // Check if a saved closing exists for this date in saved_reports
-  const savedReportMap = new Map<string, Record<string, unknown>>();
-  for (const rep of (rawSavedReports ?? []) as Array<Record<string, unknown>>) {
-    const payload = (rep.payload ?? {}) as Record<string, unknown>;
-    const dateKey = String(payload.closingDate ?? rep.title ?? "").slice(0, 10);
-    if (dateKey && !savedReportMap.has(dateKey)) {
-      savedReportMap.set(dateKey, {
+  // Separate active closings by (closingDate:shiftLabel) from preserved VOIDED closings
+  const activeClosingBySlot = new Map<string, Record<string, unknown>>();
+  const latestVoidedBySlot = new Map<string, VoidedClosingContext>();
+  const seenClosingDates = new Set<string>();
+
+  for (const rep of rawSavedReports) {
+    const payload = rep.payload;
+    const dateKey = String(payload.closingDate ?? "").slice(0, 10);
+    if (!dateKey) continue;
+    seenClosingDates.add(dateKey);
+    const slotKey = `${dateKey}:${payload.shiftLabel}`;
+    const savedIso = String(rep.updated_at ?? rep.created_at ?? "");
+    if (payload.status === "VOIDED") {
+      if (!latestVoidedBySlot.has(slotKey)) {
+        latestVoidedBySlot.set(slotKey, {
+          id: payload.id,
+          voidReason: payload.voidReason ?? null,
+          voidedAtIso: payload.voidedAtIso ?? null,
+          voidedByName: payload.voidedByName ?? null,
+        });
+      }
+    } else if (!activeClosingBySlot.has(slotKey)) {
+      activeClosingBySlot.set(slotKey, {
         ...payload,
-        _savedAtIso: String(rep.updated_at ?? rep.created_at ?? ""),
+        _savedAtIso: savedIso,
       });
     }
   }
 
-  const savedForDate = savedReportMap.get(targetDate);
+  const targetSlotKey = `${targetDate}:${targetShift}`;
+  const savedForDate = activeClosingBySlot.get(targetSlotKey);
+  const replacedVoided = !savedForDate ? (latestVoidedBySlot.get(targetSlotKey) ?? null) : null;
 
   // Build default wages list from live active employees + standard daily wage roster
   const existingNames = new Set<string>();
@@ -311,18 +413,25 @@ export async function loadClosingDataForDate(
     }
   }
 
+  const defaultMorning =
+    targetShift === "FULL_DAY" || targetShift === "MORNING" ? liveMorningCashPaisa : 0;
+  const defaultEvening =
+    targetShift === "FULL_DAY" || targetShift === "EVENING" ? liveEveningCashPaisa : 0;
+  const defaultNight =
+    targetShift === "FULL_DAY" || targetShift === "NIGHT" ? liveNightCashPaisa : 0;
+
   const morningCashPaisa =
     savedForDate !== undefined
-      ? Number(savedForDate.morningCashPaisa ?? liveMorningCashPaisa)
-      : liveMorningCashPaisa;
+      ? Number(savedForDate.morningCashPaisa ?? defaultMorning)
+      : defaultMorning;
   const eveningCashPaisa =
     savedForDate !== undefined
-      ? Number(savedForDate.eveningCashPaisa ?? liveEveningCashPaisa)
-      : liveEveningCashPaisa;
+      ? Number(savedForDate.eveningCashPaisa ?? defaultEvening)
+      : defaultEvening;
   const nightCashPaisa =
     savedForDate !== undefined
-      ? Number(savedForDate.nightCashPaisa ?? liveNightCashPaisa)
-      : liveNightCashPaisa;
+      ? Number(savedForDate.nightCashPaisa ?? defaultNight)
+      : defaultNight;
 
   const customExpenses: ClosingExpenseEntry[] = Array.isArray(
     savedForDate?.closingExpenses
@@ -349,41 +458,51 @@ export async function loadClosingDataForDate(
 
   const cashDifferencePaisa = actualClosingPaisa - expectedClosingPaisa;
 
-  const history: ClosingHistorySummary[] = [];
-  for (const [dateKey, payload] of savedReportMap.entries()) {
+  const history: ClosingHistorySummary[] = rawSavedReports.map((rep) => {
+    const payload = rep.payload;
     const expList = Array.isArray(payload.closingExpenses)
       ? (payload.closingExpenses as ClosingExpenseEntry[])
       : [];
     const wageList = Array.isArray(payload.wages)
       ? (payload.wages as ClosingWageEntry[])
       : [];
-    history.push({
-      closingDate: dateKey,
-      grossSalesPaisa: Number(payload.grossSalesPaisa ?? 0),
-      netSalesPaisa: Number(payload.netSalesPaisa ?? 0),
-      cashCollectedPaisa: Number(payload.cashCollectedPaisa ?? 0),
-      digitalSalesPaisa: Number(payload.digitalSalesPaisa ?? 0),
+    return {
+      id: payload.id,
+      closingDate: payload.closingDate,
+      shiftLabel: payload.shiftLabel,
+      replacesClosingId: payload.replacesClosingId,
+      grossSalesPaisa: payload.grossSalesPaisa,
+      netSalesPaisa: payload.netSalesPaisa,
+      cashCollectedPaisa: payload.cashCollectedPaisa,
+      digitalSalesPaisa: payload.digitalSalesPaisa,
       totalExpensesPaisa:
-        Number(payload.liveExpensesPaisa ?? 0) +
+        payload.liveExpensesPaisa +
         expList.reduce((s, e) => s + Number(e.amountPaisa || 0), 0),
       totalWagesPaisa: wageList.reduce(
         (s, w) => s + Number(w.wagePaisa || 0),
         0
       ),
-      expectedClosingPaisa: Number(payload.expectedClosingPaisa ?? 0),
-      actualClosingPaisa: Number(payload.actualClosingPaisa ?? 0),
-      cashDifferencePaisa: Number(payload.cashDifferencePaisa ?? 0),
-      status: "SAVED",
-      updatedAtIso: String(payload._savedAtIso ?? new Date().toISOString()),
-    });
-  }
+      expectedClosingPaisa: payload.expectedClosingPaisa,
+      actualClosingPaisa: payload.actualClosingPaisa,
+      cashDifferencePaisa: payload.cashDifferencePaisa,
+      status: payload.status,
+      preparedByName: payload.preparedByName ?? ctx.fullName,
+      voidReason: payload.voidReason ?? null,
+      voidedAtIso: payload.voidedAtIso ?? null,
+      voidedByName: payload.voidedByName ?? null,
+      updatedAtIso: String(rep.updated_at ?? rep.created_at ?? new Date().toISOString()),
+    };
+  });
 
-  // Include snapshots if any exist outside saved_reports
+  // Include standalone legacy snapshots only if no daily_closings row exists for that date
   for (const snap of (rawSnapshots ?? []) as Array<Record<string, unknown>>) {
     const d = String(snap.snapshot_date ?? "").slice(0, 10);
-    if (!d || savedReportMap.has(d)) continue;
+    if (!d || seenClosingDates.has(d)) continue;
     history.push({
+      id: String(snap.id ?? `snap-${d}`),
       closingDate: d,
+      shiftLabel: "FULL_DAY",
+      replacesClosingId: null,
       grossSalesPaisa: Number(snap.gross_sales_paisa ?? 0),
       netSalesPaisa: Number(snap.net_sales_paisa ?? 0),
       cashCollectedPaisa: Number(snap.cash_collected_paisa ?? 0),
@@ -394,15 +513,28 @@ export async function loadClosingDataForDate(
       actualClosingPaisa: Number(snap.cash_collected_paisa ?? 0) - Number(snap.expenses_paisa ?? 0),
       cashDifferencePaisa: 0,
       status: "SAVED",
+      preparedByName: null,
       updatedAtIso: String(snap.updated_at ?? snap.created_at ?? ""),
     });
   }
 
-  history.sort((a, b) => b.closingDate.localeCompare(a.closingDate));
+  history.sort((a, b) => {
+    const dateCmp = b.closingDate.localeCompare(a.closingDate);
+    if (dateCmp !== 0) return dateCmp;
+    return String(b.updatedAtIso).localeCompare(String(a.updatedAtIso));
+  });
+
+  const recordStatus: "DRAFT" | "SAVED" | "VOIDED" = savedForDate ? "SAVED" : "DRAFT";
 
   return {
     record: {
+      id: savedForDate ? String(savedForDate.id) : null,
       closingDate: targetDate,
+      shiftLabel: targetShift,
+      replacesClosingId: savedForDate?.replacesClosingId
+        ? String(savedForDate.replacesClosingId)
+        : replacedVoided?.id ?? null,
+      replacedVoided,
       morningCashPaisa,
       eveningCashPaisa,
       nightCashPaisa,
@@ -419,18 +551,24 @@ export async function loadClosingDataForDate(
       cashDifferencePaisa,
       transactionCount,
       notes: String(savedForDate?.notes ?? ""),
-      status: savedForDate ? "SAVED" : "DRAFT",
+      status: recordStatus,
       savedAtIso: savedForDate ? String(savedForDate._savedAtIso ?? "") : null,
       preparedByName: savedForDate?.preparedByName
         ? String(savedForDate.preparedByName)
         : ctx.fullName,
+      voidReason: null,
+      voidedAtIso: null,
+      voidedByName: null,
     },
     history,
   };
 }
 
-export async function loadClosingDataForDateAction(closingDate: string) {
-  return loadClosingDataForDate(closingDate);
+export async function loadClosingDataForDateAction(
+  closingDate: string,
+  shiftLabel?: ClosingShiftLabel
+) {
+  return loadClosingDataForDate(closingDate, shiftLabel);
 }
 
 export async function saveDailyClosingAction(payload: SaveDailyClosingPayload) {
@@ -440,9 +578,10 @@ export async function saveDailyClosingAction(payload: SaveDailyClosingPayload) {
   const targetDate = /^\d{4}-\d{2}-\d{2}$/.test(payload.closingDate)
     ? payload.closingDate
     : formatPkDate();
+  const targetShift = normalizeClosingShiftLabel(payload.shiftLabel);
 
   // Always recompute live sales totals for authoritative accuracy
-  const live = await loadClosingDataForDate(targetDate);
+  const live = await loadClosingDataForDate(targetDate, targetShift);
   const customExpenses = payload.closingExpenses.filter((e) => !e.fromDb);
   const totalClosingExpensesPaisa = customExpenses.reduce(
     (s, e) => s + Math.max(0, Math.round(Number(e.amountPaisa || 0))),
@@ -463,119 +602,173 @@ export async function saveDailyClosingAction(payload: SaveDailyClosingPayload) {
     morningCashPaisa + eveningCashPaisa + nightCashPaisa - totalOutflowsPaisa;
   const cashDifferencePaisa = actualClosingPaisa - expectedClosingPaisa;
 
-  const admin = createSupabaseAdminClient();
   const totalExpensesAllPaisa = live.record.liveExpensesPaisa + totalClosingExpensesPaisa;
 
-  // 1. Upsert daily_report_snapshots (live table)
-  await admin.from("daily_report_snapshots").upsert(
-    {
-      business_id: ctx.businessId,
-      snapshot_date: targetDate,
-      gross_sales_paisa: live.record.grossSalesPaisa,
-      refunds_paisa: live.record.refundsPaisa,
-      net_sales_paisa: live.record.netSalesPaisa,
-      expenses_paisa: totalExpensesAllPaisa + totalWagesPaisa,
-      cash_collected_paisa: morningCashPaisa + eveningCashPaisa + nightCashPaisa,
-      digital_collected_paisa: live.record.digitalSalesPaisa,
-      currency: "PKR",
-      generated_by: ctx.userId,
-    },
-    { onConflict: "business_id,snapshot_date" }
-  );
-
-  // 2. Save detailed closing breakdown in saved_reports (update existing for date or insert)
-  const fullPayload = {
-    closingDate: targetDate,
-    morningCashPaisa,
-    eveningCashPaisa,
-    nightCashPaisa,
-    grossSalesPaisa: live.record.grossSalesPaisa,
-    refundsPaisa: live.record.refundsPaisa,
-    netSalesPaisa: live.record.netSalesPaisa,
-    cashCollectedPaisa: live.record.cashCollectedPaisa,
-    digitalSalesPaisa: live.record.digitalSalesPaisa,
-    liveExpensesPaisa: live.record.liveExpensesPaisa,
-    closingExpenses: customExpenses,
-    wages: payload.wages,
-    expectedClosingPaisa,
-    actualClosingPaisa,
-    cashDifferencePaisa,
-    notes: payload.notes.trim(),
-    preparedByName: ctx.fullName,
-  };
-
-  const reportTitle = `DAILY_CLOSING_${targetDate}`;
-  const { data: existingReport } = await admin
-    .from("saved_reports")
-    .select("id")
-    .eq("business_id", ctx.businessId)
-    .eq("report_type", "DAILY_CLOSING")
-    .eq("title", reportTitle)
-    .maybeSingle();
-
-  if (existingReport?.id) {
-    const { error: updErr } = await admin
-      .from("saved_reports")
-      .update({
-        payload: fullPayload,
-        generated_by: ctx.userId,
-      })
-      .eq("id", existingReport.id);
-    if (updErr) {
-      throw new Error(`Failed to update daily closing: ${updErr.message}`);
-    }
-  } else {
-    const { error: insErr } = await admin.from("saved_reports").insert({
-      business_id: ctx.businessId,
-      report_type: "DAILY_CLOSING",
-      title: reportTitle,
-      payload: fullPayload,
-      generated_by: ctx.userId,
-    });
-    if (insErr) {
-      throw new Error(`Failed to save daily closing: ${insErr.message}`);
-    }
-  }
-
-  // 3. Best-effort sync to daily_closings table if SQL migration 0007 has been applied
-  try {
-    await admin.from("daily_closings").upsert(
-      {
-        business_id: ctx.businessId,
-        closing_date: targetDate,
-        morning_cash_paisa: morningCashPaisa,
-        evening_cash_paisa: eveningCashPaisa,
-        night_cash_paisa: nightCashPaisa,
-        gross_sales_paisa: live.record.grossSalesPaisa,
-        refunds_paisa: live.record.refundsPaisa,
-        net_sales_paisa: live.record.netSalesPaisa,
-        digital_sales_paisa: live.record.digitalSalesPaisa,
-        total_expenses_paisa: totalExpensesAllPaisa,
-        total_wages_paisa: totalWagesPaisa,
-        expected_closing_paisa: expectedClosingPaisa,
-        actual_closing_paisa: actualClosingPaisa,
-        cash_variance_paisa: cashDifferencePaisa,
-        expenses_json: customExpenses,
-        wages_json: payload.wages,
-        notes: payload.notes.trim(),
-        status: "SUBMITTED",
-        prepared_by: ctx.userId,
-      },
-      { onConflict: "business_id,closing_date" }
+  const saveMeta = await withTransaction(async (client) => {
+    await client.query(
+      `INSERT INTO daily_report_snapshots (
+         business_id, snapshot_date, gross_sales_paisa, refunds_paisa,
+         net_sales_paisa, expenses_paisa, cash_collected_paisa,
+         digital_collected_paisa, currency, generated_by
+       )
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'PKR', $9)
+       ON CONFLICT (business_id, snapshot_date) DO UPDATE SET
+         gross_sales_paisa = EXCLUDED.gross_sales_paisa,
+         refunds_paisa = EXCLUDED.refunds_paisa,
+         net_sales_paisa = EXCLUDED.net_sales_paisa,
+         expenses_paisa = EXCLUDED.expenses_paisa,
+         cash_collected_paisa = EXCLUDED.cash_collected_paisa,
+         digital_collected_paisa = EXCLUDED.digital_collected_paisa,
+         generated_by = EXCLUDED.generated_by`,
+      [
+        ctx.businessId,
+        targetDate,
+        live.record.grossSalesPaisa,
+        live.record.refundsPaisa,
+        live.record.netSalesPaisa,
+        totalExpensesAllPaisa + totalWagesPaisa,
+        morningCashPaisa + eveningCashPaisa + nightCashPaisa,
+        live.record.digitalSalesPaisa,
+        ctx.userId,
+      ]
     );
-  } catch {
-    // Table may not exist yet before migration push; saved_reports & daily_report_snapshots succeeded
-  }
+
+    // Check if an active (non-VOIDED) closing already exists for this (date, shift).
+    // VOIDED closings are ALWAYS preserved untouched in DB for audit history.
+    const activeRes = await client.query<{ id: string }>(
+      `SELECT id
+       FROM daily_closings
+       WHERE business_id = $1
+         AND closing_date = $2
+         AND COALESCE(shift_label, 'FULL_DAY') = $3
+         AND UPPER(COALESCE(status, 'SUBMITTED')) <> 'VOIDED'
+       LIMIT 1
+       FOR UPDATE`,
+      [ctx.businessId, targetDate, targetShift]
+    );
+
+    let savedId: string;
+    let replacesId: string | null = null;
+
+    if (activeRes.rows[0]?.id) {
+      savedId = String(activeRes.rows[0].id);
+      await client.query(
+        `UPDATE daily_closings
+         SET morning_cash_paisa = $1,
+             evening_cash_paisa = $2,
+             night_cash_paisa = $3,
+             gross_sales_paisa = $4,
+             refunds_paisa = $5,
+             net_sales_paisa = $6,
+             digital_sales_paisa = $7,
+             total_expenses_paisa = $8,
+             total_wages_paisa = $9,
+             expected_closing_paisa = $10,
+             actual_closing_paisa = $11,
+             cash_variance_paisa = $12,
+             expenses_json = $13::jsonb,
+             wages_json = $14::jsonb,
+             notes = $15,
+             prepared_by = $16,
+             prepared_by_name = $17,
+             updated_at = NOW()
+         WHERE id = $18`,
+        [
+          morningCashPaisa,
+          eveningCashPaisa,
+          nightCashPaisa,
+          live.record.grossSalesPaisa,
+          live.record.refundsPaisa,
+          live.record.netSalesPaisa,
+          live.record.digitalSalesPaisa,
+          totalExpensesAllPaisa,
+          totalWagesPaisa,
+          expectedClosingPaisa,
+          actualClosingPaisa,
+          cashDifferencePaisa,
+          JSON.stringify(customExpenses),
+          JSON.stringify(payload.wages),
+          payload.notes.trim(),
+          ctx.userId,
+          ctx.fullName,
+          savedId,
+        ]
+      );
+    } else {
+      // If replacing a previously voided closing for this date & shift, link its ID cleanly
+      if (payload.replacesClosingId) {
+        replacesId = payload.replacesClosingId;
+      } else {
+        const voidRes = await client.query<{ id: string }>(
+          `SELECT id
+           FROM daily_closings
+           WHERE business_id = $1
+             AND closing_date = $2
+             AND COALESCE(shift_label, 'FULL_DAY') = $3
+             AND UPPER(COALESCE(status, 'SUBMITTED')) = 'VOIDED'
+           ORDER BY voided_at DESC NULLS LAST, created_at DESC
+           LIMIT 1`,
+          [ctx.businessId, targetDate, targetShift]
+        );
+        replacesId = voidRes.rows[0]?.id ? String(voidRes.rows[0].id) : null;
+      }
+
+      const insRes = await client.query<{ id: string }>(
+        `INSERT INTO daily_closings (
+           business_id, closing_date, shift_label, replaces_closing_id,
+           morning_cash_paisa, evening_cash_paisa, night_cash_paisa,
+           gross_sales_paisa, refunds_paisa, net_sales_paisa,
+           digital_sales_paisa, total_expenses_paisa, total_wages_paisa,
+           expected_closing_paisa, actual_closing_paisa, cash_variance_paisa,
+           expenses_json, wages_json, notes, status, prepared_by, prepared_by_name
+         )
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17::jsonb, $18::jsonb, $19, 'SUBMITTED', $20, $21)
+         RETURNING id`,
+        [
+          ctx.businessId,
+          targetDate,
+          targetShift,
+          replacesId,
+          morningCashPaisa,
+          eveningCashPaisa,
+          nightCashPaisa,
+          live.record.grossSalesPaisa,
+          live.record.refundsPaisa,
+          live.record.netSalesPaisa,
+          live.record.digitalSalesPaisa,
+          totalExpensesAllPaisa,
+          totalWagesPaisa,
+          expectedClosingPaisa,
+          actualClosingPaisa,
+          cashDifferencePaisa,
+          JSON.stringify(customExpenses),
+          JSON.stringify(payload.wages),
+          payload.notes.trim(),
+          ctx.userId,
+          ctx.fullName,
+        ]
+      );
+      savedId = String(insRes.rows[0].id);
+    }
+
+    return { savedId, replacesId };
+  });
 
   await writeAuditLog({
     businessId: ctx.businessId,
     actorName: ctx.fullName,
-    actionType: "DAILY_CLOSING_SAVED",
-    description: `Saved Daily Closing for ${targetDate}: Expected Rs. ${Math.round(
+    actionType: saveMeta.replacesId ? "DAILY_CLOSING_REPLACED" : "DAILY_CLOSING_SAVED",
+    description: `${
+      saveMeta.replacesId ? "Saved replacement" : "Saved"
+    } Daily Closing for ${targetDate} (${targetShift}): Expected Rs. ${Math.round(
       expectedClosingPaisa / 100
     )}, Counted Rs. ${Math.round(actualClosingPaisa / 100)}`,
     metadata: {
+      entity_type: "daily_closings",
+      entity_id: saveMeta.savedId,
       closing_date: targetDate,
+      shift_label: targetShift,
+      replaces_closing_id: saveMeta.replacesId,
       expected_closing_paisa: expectedClosingPaisa,
       actual_closing_paisa: actualClosingPaisa,
       cash_difference_paisa: cashDifferencePaisa,
@@ -584,7 +777,152 @@ export async function saveDailyClosingAction(payload: SaveDailyClosingPayload) {
 
   revalidatePath("/dashboard");
   revalidatePath("/dashboard/closing");
+  revalidatePath("/sales");
   revalidatePath("/reports");
+  revalidatePath("/audit");
 
-  return loadClosingDataForDate(targetDate);
+  return loadClosingDataForDate(targetDate, targetShift);
+}
+
+export async function voidDailyClosingAction(payload: {
+  closingId?: string;
+  closingDate?: string;
+  shiftLabel?: ClosingShiftLabel;
+  reason?: string;
+}) {
+  const ctx = await getAuthenticatedShopContext();
+  if (!ctx || !ctx.businessId) redirect("/login");
+  const businessId = ctx.businessId;
+
+  if (!hasRequiredRole(ctx.role, ["OWNER", "MANAGER"])) {
+    throw new Error("Only authorized Owners or Managers can void a Daily Closing entry.");
+  }
+
+  const cleanReason = String(payload.reason ?? "").trim();
+  if (!cleanReason) {
+    throw new Error("A reason for voiding the Daily Closing is required.");
+  }
+
+  const targetDateRaw = payload.closingDate && /^\d{4}-\d{2}-\d{2}$/.test(payload.closingDate)
+    ? payload.closingDate
+    : "";
+  const targetShift = normalizeClosingShiftLabel(payload.shiftLabel);
+
+  if (!payload.closingId && !targetDateRaw) {
+    throw new Error("Valid closing ID or closing date is required.");
+  }
+
+  const voidResult = await withTransaction(async (client) => {
+    const existingRes = payload.closingId
+      ? await client.query<{
+          id: string;
+          closing_date: string | Date;
+          shift_label: string | null;
+          status: string;
+          net_sales_paisa: string | number;
+          actual_closing_paisa: string | number;
+        }>(
+          `SELECT id, closing_date, COALESCE(shift_label, 'FULL_DAY') AS shift_label,
+                  status, net_sales_paisa, actual_closing_paisa
+           FROM daily_closings
+           WHERE business_id = $1 AND id = $2
+           FOR UPDATE`,
+          [ctx.businessId, payload.closingId]
+        )
+      : await client.query<{
+          id: string;
+          closing_date: string | Date;
+          shift_label: string | null;
+          status: string;
+          net_sales_paisa: string | number;
+          actual_closing_paisa: string | number;
+        }>(
+          `SELECT id, closing_date, COALESCE(shift_label, 'FULL_DAY') AS shift_label,
+                  status, net_sales_paisa, actual_closing_paisa
+           FROM daily_closings
+           WHERE business_id = $1
+             AND closing_date = $2
+             AND COALESCE(shift_label, 'FULL_DAY') = $3
+             AND UPPER(COALESCE(status, 'SUBMITTED')) <> 'VOIDED'
+           FOR UPDATE`,
+          [ctx.businessId, targetDateRaw, targetShift]
+        );
+
+    const existing = existingRes.rows[0];
+    if (!existing) {
+      throw new Error("No active saved Daily Closing found to void.");
+    }
+    if (String(existing.status).toUpperCase() === "VOIDED") {
+      throw new Error("This Daily Closing entry is already voided.");
+    }
+
+    const resolvedDate =
+      existing.closing_date instanceof Date
+        ? formatPkDate(existing.closing_date)
+        : String(existing.closing_date).slice(0, 10);
+    const resolvedShift = normalizeClosingShiftLabel(existing.shift_label);
+
+    // ONLY invalidate the closing record itself. Never touch sales, payments, inventory, or cash_sessions.
+    await client.query(
+      `UPDATE daily_closings
+       SET status = 'VOIDED',
+           voided_at = NOW(),
+           voided_by = $1,
+           voided_by_name = $2,
+           void_reason = $3,
+           updated_at = NOW()
+       WHERE id = $4`,
+      [ctx.userId, ctx.fullName, cleanReason, existing.id]
+    );
+
+    // Clear daily_report_snapshots for that date only if no remaining active closing exists
+    const remainingActive = await client.query<{ cnt: string | number }>(
+      `SELECT COUNT(*) AS cnt
+       FROM daily_closings
+       WHERE business_id = $1
+         AND closing_date = $2
+         AND UPPER(COALESCE(status, 'SUBMITTED')) <> 'VOIDED'`,
+      [ctx.businessId, resolvedDate]
+    );
+    if (Number(remainingActive.rows[0]?.cnt ?? 0) === 0) {
+      await client.query(
+        `DELETE FROM daily_report_snapshots
+         WHERE business_id = $1 AND snapshot_date = $2`,
+        [ctx.businessId, resolvedDate]
+      );
+    }
+
+    await writeAuditLog({
+      businessId,
+      actorName: ctx.fullName ?? "Authorized User",
+      actionType: "DAILY_CLOSING_VOIDED",
+      description: `Voided Daily Closing for ${resolvedDate} (${resolvedShift}): ${cleanReason}`,
+      metadata: {
+        entity_type: "daily_closings",
+        entity_id: existing.id,
+        closing_date: resolvedDate,
+        shift_label: resolvedShift,
+        reason: cleanReason,
+        before_state: {
+          status: existing.status,
+          net_sales_paisa: existing.net_sales_paisa,
+          actual_closing_paisa: existing.actual_closing_paisa,
+        },
+        after_state: {
+          status: "VOIDED",
+          void_reason: cleanReason,
+        },
+      },
+    });
+
+    return { resolvedDate, resolvedShift };
+  });
+
+  revalidatePath("/dashboard");
+  revalidatePath("/dashboard/closing");
+  revalidatePath("/sales");
+  revalidatePath("/reports");
+  revalidatePath("/audit");
+
+  return loadClosingDataForDate(voidResult.resolvedDate, voidResult.resolvedShift);
 }
